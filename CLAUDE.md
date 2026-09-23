@@ -37,6 +37,22 @@ curl -sS https://developers-pr-2869.previews.kube001.services.stellar-ops.com/do
 Use the build from `main` by its full path: `~/.stellar-main/bin/stellar`
 (installed by `scripts/setup.sh`, see the README).
 
+### Start every session with `stellar skill`
+
+Run `~/.stellar-main/bin/stellar skill` before the first `stellar` command and
+follow its conventions (named identities, never raw `S...` secrets, contract
+aliases, `--send=no` for reads, stdout vs. stderr). It doesn't cover
+`stellar token`, `tx new`, trustlines, or allowances; use the agent CLI docs
+for those.
+
+One exception in cloud sessions: the skill says to set defaults with
+`stellar network use` / `stellar keys use` and omit the flags. Don't. Pass
+`--network testnet-relay` and the source flag (`--source`, or `--from` for
+`token transfer` / `token approve`) on every command, as the Quickstart
+advises for agents. Saved defaults live in `~/.config/stellar`, which is lost
+with the container, and a stale default could silently target the wrong
+network.
+
 ### Reaching testnet from a cloud session
 
 The CLI's RPC client (`jsonrpsee`) ignores `HTTPS_PROXY`, and there's no CLI
