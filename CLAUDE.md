@@ -12,6 +12,21 @@ curl -sS https://developers.stellar.org/llms.txt
 curl -sS https://developers.stellar.org/docs/tools/cli.md
 ```
 
+### Prefer the PR 2869 docs preview (for now)
+
+The agent CLI docs are still in review. Read them from the preview first:
+
+```bash
+curl -sS https://developers-pr-2869.previews.kube001.services.stellar-ops.com/docs/tools/cli/agent-cli.md
+```
+
+- Links inside preview pages point at `developers.stellar.org`. To follow one,
+  keep the path and swap the host for the preview host.
+- Fall back to `developers.stellar.org` only if the preview is down or doesn't
+  have the page, and say which source you used.
+
+### Live docs
+
 - Go straight to `https://developers.stellar.org`. `docs.stellar.org` redirects
   to plain `http://developers.stellar.org`, which the proxy refuses.
 - The full docs are in one large file at
