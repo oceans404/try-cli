@@ -130,6 +130,10 @@ curl -sS "https://explorer-explorer.up.railway.app/sellers?limit=50&offset=0&reg
 - Paying needs an x402 client (the CLI can't). Follow the agent CLI guide
   "Pay for APIs with x402" (`/docs/tools/cli/agent-cli/guides/pay-for-apis-x402`):
   `@x402/stellar` + `@x402/fetch` in Node, signing with a CLI identity's key.
-  Its steps work for these sellers too. Buyers need testnet USDC (trustline,
+  Its steps work for these sellers too. In cloud sessions run the Node client
+  with `NODE_USE_ENV_PROXY=1`, or its requests get 403 like the CLI's. Buyers need testnet USDC (trustline,
   then swap XLM on the DEX).
 - Testnet only. Don't touch mainnet sellers or funds without the user's go-ahead.
+- Whenever you report a transaction, include its stellar.expert link:
+  `https://stellar.expert/explorer/testnet/tx/<HASH>` on testnet,
+  `https://stellar.expert/explorer/public/tx/<HASH>` on mainnet.
