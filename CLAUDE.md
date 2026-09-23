@@ -37,6 +37,29 @@ curl -sS https://developers-pr-2869.previews.kube001.services.stellar-ops.com/do
 Use the build from `main` by its full path: `~/.stellar-main/bin/stellar`
 (installed by `scripts/setup.sh`, see the README).
 
+### Reaching testnet from a cloud session
+
+The CLI's RPC client (`jsonrpsee`) ignores `HTTPS_PROXY`, and there's no CLI
+proxy setting, so `--network testnet` fails with `Request rejected 403`. Route
+it through the localhost relay, which forwards over the session's proxy:
+
+```bash
+python3 scripts/rpc-relay.py 8001 &    # run in the background; one per session
+~/.stellar-main/bin/stellar network add testnet-relay \
+  --rpc-url http://127.0.0.1:8001/ --network-passphrase "Test SDF Network ; September 2015"
+~/.stellar-main/bin/stellar network health --network testnet-relay
+```
+
+- Use `--network testnet-relay` wherever the docs say `--network testnet`.
+  It's the same network (same passphrase), so addresses, hashes and
+  stellar.expert links are all real testnet.
+- The relay also serves friendbot, so `keys generate --fund` and `keys fund`
+  work.
+- `network add` persists in `~/.config/stellar`, but that's lost with the
+  container; re-run both steps in a new session.
+- If the relay itself logs a 403, check for Cloudflare `error code: 1010`
+  (it blocks some User-Agents) before blaming the network policy.
+
 ## Stellar Skills (skills.stellar.org)
 
 Agent-readable guides for building on Stellar, beyond the CLI. The index is
