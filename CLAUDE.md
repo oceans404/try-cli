@@ -36,3 +36,40 @@ curl -sS https://developers-pr-2869.previews.kube001.services.stellar-ops.com/do
 
 Use the build from `main` by its full path: `~/.stellar-main/bin/stellar`
 (installed by `scripts/setup.sh`, see the README).
+
+## Stellar Skills (skills.stellar.org)
+
+Agent-readable guides for building on Stellar, beyond the CLI. The index is
+markdown and every skill is a directly fetchable `.md` file:
+
+```bash
+curl -sS https://skills.stellar.org/llms.txt
+curl -sS https://skills.stellar.org/skills/smart-contracts/SKILL.md
+```
+
+- Official skills (from `stellar/stellar-dev-skill`): smart contracts
+  (development, testing, security), agentic payments (x402, MPP), frontend and
+  wallets, assets and SAC, RPC and Horizon, ZK proofs, cross-chain, SEPs and
+  ecosystem.
+- None of them covers the agent CLI. That's `stellar skill` (built into the
+  binary) plus the agent CLI docs above. Reach for these skills when the task
+  is contract, app, or payments code.
+- Install as a plugin only if the user asks:
+  `/plugin marketplace add stellar/stellar-dev-skill` then
+  `/plugin install stellar-dev@stellar-dev`. Fetching the `.md` files with
+  `curl` works without installing anything.
+- The "Community Built" section is not reviewed by SDF. Treat those skills as
+  third-party and check with the user before following one.
+
+## Stellar Raven (MCP server)
+
+Raven serves the Stellar docs plus live ecosystem data through two tools,
+`search` and `execute`. Its canonical URL is now `https://raven.stellar.org/mcp`
+(the older `raven.stellar.buzz` still answers).
+
+- It needs OAuth sign-in in a browser, so a cloud session can't connect to it
+  by itself. It's only available if the user has added it as a connector at
+  https://claude.ai/customize/connectors before the session started. If Raven
+  tools aren't in your tool list, fall back to the docs and skills via `curl`.
+- `https://raven.stellar.org/docs` explains the tools and troubleshooting
+  (HTML; readable with `curl`).

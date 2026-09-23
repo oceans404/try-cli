@@ -17,7 +17,7 @@ Call the main build by its full path:
 
 ## Agent resources
 
-- Raven MCP server: `https://raven.stellar.buzz/mcp`
-  (`claude mcp add --transport http stellar-raven "https://raven.stellar.buzz/mcp"`, then `/mcp` → Authenticate)
+- Raven MCP server: `https://raven.stellar.org/mcp`
+  (`claude mcp add --transport http stellar-raven "https://raven.stellar.org/mcp"`, then `/mcp` → Authenticate)
 - Stellar Skills: https://skills.stellar.org (`stellar/stellar-dev-skill`)
 - `llms.txt`: https://developers.stellar.org/llms.txt
