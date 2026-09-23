@@ -20,6 +20,9 @@ The agent CLI docs are still in review. Read them from the preview first:
 curl -sS https://developers-pr-2869.previews.kube001.services.stellar-ops.com/docs/tools/cli/agent-cli.md
 ```
 
+- The sidebar doesn't link every page (e.g. `guides/pay-for-apis-x402`). List
+  them all from the sitemap:
+  `curl -sS https://developers-pr-2869.previews.kube001.services.stellar-ops.com/sitemap.xml | grep -o '[^<>]*agent-cli[^<>]*'`
 - Links inside preview pages point at `developers.stellar.org`. To follow one,
   keep the path and swap the host for the preview host.
 - Fall back to `developers.stellar.org` only if the preview is down or doesn't
@@ -124,6 +127,9 @@ curl -sS "https://explorer-explorer.up.railway.app/sellers?limit=50&offset=0&reg
 
 - Each seller's `resource` URL returns HTTP 402 when unpaid; its
   `payment-required` header is base64 JSON with the price, asset, and `payTo`.
-- Paying needs an x402 client (the CLI can't); see the Agentic Payments skill's
-  `x402.md`. Buyers need testnet USDC (trustline, then swap XLM on the DEX).
+- Paying needs an x402 client (the CLI can't). Follow the agent CLI guide
+  "Pay for APIs with x402" (`/docs/tools/cli/agent-cli/guides/pay-for-apis-x402`):
+  `@x402/stellar` + `@x402/fetch` in Node, signing with a CLI identity's key.
+  Its steps work for these sellers too. Buyers need testnet USDC (trustline,
+  then swap XLM on the DEX).
 - Testnet only. Don't touch mainnet sellers or funds without the user's go-ahead.
