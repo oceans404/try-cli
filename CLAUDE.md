@@ -112,3 +112,18 @@ Raven serves the Stellar docs plus live ecosystem data through two tools,
   tools aren't in your tool list, fall back to the docs and skills via `curl`.
 - `https://raven.stellar.org/docs` explains the tools and troubleshooting
   (HTML; readable with `curl`).
+
+## x402 marketplace: Rail402 Explorer (testnet only for now)
+
+https://explorer.rail402.dev indexes Stellar x402 payments and lists sellers.
+The site is a JS app, so query its API with `curl`:
+
+```bash
+curl -sS "https://explorer-explorer.up.railway.app/sellers?limit=50&offset=0&registered=true"
+```
+
+- Each seller's `resource` URL returns HTTP 402 when unpaid; its
+  `payment-required` header is base64 JSON with the price, asset, and `payTo`.
+- Paying needs an x402 client (the CLI can't); see the Agentic Payments skill's
+  `x402.md`. Buyers need testnet USDC (trustline, then swap XLM on the DEX).
+- Testnet only. Don't touch mainnet sellers or funds without the user's go-ahead.
