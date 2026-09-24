@@ -8,7 +8,7 @@ wallet for mainnet.
 | --- | --- |
 | [`example-x402-seller/`](example-x402-seller) | A paid x402 API on testnet ([live](https://try-cli-jukj.onrender.com/fortune)) and a buyer script |
 | [`privy-wallet/`](privy-wallet) | The secure/mainnet wallet. Its key is held by Privy; spending is capped by a USDC allowance |
-| [`docs/`](docs) | Stellar DeFi directory, and testnet DeFi recipes for the CLI |
+| [`docs/`](docs) | Stellar DeFi directory, testnet DeFi recipes for the CLI, and an experimental record of Claude's mainnet session |
 | [`scripts/`](scripts) | `setup.sh` builds the CLI; `rpc-relay.py` lets it reach testnet/mainnet through the cloud proxy |
 | [`.env.claudecode`](.env.claudecode) | What the cloud environment needs (variables, setup script, hosts) |
 | [`CLAUDE.md`](CLAUDE.md) | Session setup and rules for agents |

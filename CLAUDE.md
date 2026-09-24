@@ -47,7 +47,7 @@ addresses, hashes, and stellar.expert links. Identities and networks live in
 | `scripts/session-start.sh` | Per-session setup, run by `/session-setup` |
 | `scripts/rpc-relay.py` | `rpc-relay.py [port] [rpc-url]`, testnet by default |
 | `example-x402-seller/` | Live x402 seller ([/fortune](https://try-cli-jukj.onrender.com/fortune), 0.01 USDC) and `buy.mjs` |
-| `docs/` | DeFi directory (10 services, contract IDs) and tested testnet DeFi CLI recipes (Soroswap, Blend, DeFindex, classic DEX/AMM, CETES, gotchas) |
+| `docs/` | DeFi directory (10 services, contract IDs) and tested testnet DeFi CLI recipes (Soroswap, Blend, DeFindex, classic DEX/AMM, CETES, gotchas), plus `mainnet-defi-cli.md`, an experimental record of Claude's mainnet session (not a guide) |
 | `privy-wallet/` | Privy-signed wallet: the CLI builds, `privy.mjs` signs with `--yes`, spending capped by a USDC allowance |
 
 ## Networks and assets
