@@ -17,6 +17,11 @@ $S contract alias add xlm  --id CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU
 Aliases work as `--id`, but arguments inside JSON (paths, request lists) need
 the raw `C...` IDs.
 
+`stellar token` handles the token side: `token balance --id usdc --account my-wallet`
+works for USDC, XLM, and LP tokens. The protocol actions below are calls to the
+protocols' own contracts, so they use `contract invoke`. They move your tokens
+under the transaction's signature, so no `token approve` is needed first.
+
 ## Soroswap: swap
 
 ```bash
@@ -38,7 +43,7 @@ USDC near 9.5 XLM, while the classic DEX was near 1 XLM, so check both.
 $S contract invoke --id soroswap-router -- add_liquidity --token_a <USDC> --token_b <XLM> \
   --amount_a_desired 10000000 --amount_b_desired 100000000 --amount_a_min 9500000 --amount_b_min 80000000 \
   --to my-wallet --deadline <unix+600>
-$S contract invoke --id <pair> --send=no -- balance --id my-wallet        # LP tokens (the pair is the LP token)
+$S token balance --id <pair> --account my-wallet      # LP tokens (the pair is the LP token)
 $S contract invoke --id soroswap-router -- remove_liquidity --token_a <USDC> --token_b <XLM> \
   --liquidity <LP> --amount_a_min 9900000 --amount_b_min 1 --to my-wallet --deadline <unix+600>
 ```
