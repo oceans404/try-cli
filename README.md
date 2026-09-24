@@ -1,17 +1,22 @@
 # try-cli
 
-Trying out [Stellar CLI for Agents](https://developers.stellar.org/docs/tools/cli/agent-cli)
-from Claude Code cloud sessions: x402 payments on testnet, and a Privy-held
-wallet for mainnet.
+A sandbox for trying the [Stellar CLI for Agents](https://developers.stellar.org/docs/tools/cli/agent-cli)
+from Claude Code cloud sessions. Agents here hold wallets, buy and sell over
+[x402](https://www.x402.org/), and use Stellar DeFi, mostly on testnet. Mainnet
+goes only through a Privy-held wallet, and only with a person's OK.
 
-| Path | What |
+## What's in here
+
+| Path | What you'll find |
 | --- | --- |
-| [`example-x402-seller/`](example-x402-seller) | A paid x402 API on testnet ([live](https://try-cli-jukj.onrender.com/fortune)) and a buyer script |
-| [`privy-wallet/`](privy-wallet) | The secure/mainnet wallet. Its key is held by Privy; spending is capped by a USDC allowance |
-| [`docs/`](docs) | Stellar DeFi directory, testnet DeFi recipes for the CLI, and an experimental record of Claude's mainnet session |
-| [`scripts/`](scripts) | `setup.sh` builds the CLI; `rpc-relay.py` lets it reach testnet/mainnet through the cloud proxy |
+| [`example-x402-seller/`](example-x402-seller) | A paid x402 API ([live on testnet](https://try-cli-jukj.onrender.com/fortune), 0.01 USDC per fortune, listed on Rail402), how to run and host your own, and `buy.mjs`, a buyer for any Stellar x402 URL |
+| [`privy-wallet/`](privy-wallet) | A Stellar wallet whose key is held by [Privy](https://privy.io), not by the agent. The CLI builds transactions and `privy.mjs` shows and signs them; a USDC allowance caps spending. [`LOG.md`](privy-wallet/LOG.md) records every transaction it has made |
+| [`docs/`](docs) | A directory of 10 Stellar DeFi services and how to check them yourself, and CLI recipes tested on testnet (Soroswap, Blend, DeFindex, classic DEX/AMM, CETES). Also an experimental record of one hour of mainnet DeFi by Claude, kept to show how it went, not as a guide |
+| [`scripts/`](scripts) | `session-start.sh` readies a session, `setup.sh` builds the CLI, `rpc-relay.py` lets the CLI reach Stellar through the cloud proxy |
+| [`CLAUDE.md`](CLAUDE.md) | Instructions and rules for agents working in this repo |
 | [`.env.claudecode`](.env.claudecode) | What the cloud environment needs (variables, setup script, hosts) |
-| [`CLAUDE.md`](CLAUDE.md) | Session setup and rules for agents |
+
+Everything is experimental. Nothing here is financial advice or production code.
 
 ## Cloud session setup
 

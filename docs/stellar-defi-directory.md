@@ -35,6 +35,11 @@ TVL, APY, and pool counts change constantly, so every number here is dated.
 
 ## Checking it yourself
 
+The contract IDs on this page were right on the dates given. Before using one on
+mainnet, look it up again (Raven MCP at `https://raven.stellar.org/mcp` if
+connected, the registry below, or the protocol's docs) and call it read-only
+first.
+
 Everything here is **mainnet** (the Public network). The three hosts that answer without a key:
 
 ```

@@ -34,6 +34,12 @@ Rail402's [seller quickstart](https://docs.rail402.dev/sellers/quickstart).
 You need Node 20+, the [Stellar CLI](https://developers.stellar.org/docs/tools/cli),
 and two identities: one to receive payments, one to buy with.
 
+Commands here are written for a Claude Code cloud session: `stellar` comes from
+`scripts/session-start.sh`, which also adds the `testnet-relay` network (the
+CLI can't reach testnet through the cloud proxy directly; see `../CLAUDE.md`),
+and the environment sets `NODE_USE_ENV_PROXY=1`. On your own machine, use
+`--network testnet` instead.
+
 1. Install dependencies:
 
    ```bash
@@ -44,8 +50,8 @@ and two identities: one to receive payments, one to buy with.
    trustline or settlement fails with `op_no_trust`.
 
    ```bash
-   stellar keys generate seller --network testnet --fund
-   stellar tx new change-trust --source seller --network testnet \
+   stellar keys generate seller --network testnet-relay --fund
+   stellar tx new change-trust --source seller --network testnet-relay \
      --line USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5
    ```
 
@@ -82,8 +88,9 @@ curl -s -D - -o /dev/null http://localhost:3001/fortune \
   | grep -i '^payment-required:' | sed 's/^[^:]*: //' | tr -d '\r' | base64 -d
 ```
 
-Buy one with a funded identity that holds testnet USDC (a trustline, then swap
-XLM for USDC on the DEX with `stellar tx new path-payment-strict-send`):
+Buy one with a funded identity that holds testnet USDC (a trustline, then buy
+USDC on the DEX with `stellar tx new path-payment-strict-receive`, as in
+`../CLAUDE.md`):
 
 ```bash
 STELLAR_SECRET="$(stellar keys secret buyer)" npm run buy -- "http://localhost:3001/fortune?topic=luck"
@@ -103,7 +110,7 @@ Verify on stellar.expert at `https://stellar.expert/explorer/testnet/tx/<HASH>`,
 or from the CLI:
 
 ```bash
-stellar tx fetch events --hash <HASH> --network testnet
+stellar tx fetch events --hash <HASH> --network testnet-relay
 ```
 
 The USDC `transfer` event should name the buyer, your `payTo`, and `100000`
@@ -112,7 +119,10 @@ The USDC `transfer` event should name the buyer, your `payTo`, and `100000`
 ## Hosting on Render
 
 Create a **Web Service** on [Render](https://render.com) from this repository.
-Render builds from the branch you pick, so push your changes first.
+Render builds from the branch you pick, so push your changes first. This part
+is done by a person in Render's dashboard: an agent can push the branch and
+work out the values below, but it can't create the service, and a cloud
+session has no public URL of its own.
 
 | Setting | Value |
 | --- | --- |
@@ -140,13 +150,16 @@ Changing an environment variable redeploys the service.
 
 - **Use an identity you keep.** Whoever holds its secret key controls the
   earnings and owns the Rail402 listing. Don't use a throwaway key from a
-  temporary machine or session.
+  temporary machine or session. From a cloud session, the Privy wallet
+  (`node ../privy-wallet/privy.mjs address`) works: receiving needs no
+  signature, it outlives the container, and it already has USDC trustlines on
+  testnet and mainnet.
 - **It must exist onchain.** A key from `stellar keys generate` without
   `--fund` is not an account yet. Fund it with
-  `stellar keys fund <NAME> --network testnet`, or friendbot:
+  `stellar keys fund <NAME> --network testnet-relay`, or friendbot:
   `curl "https://friendbot.stellar.org/?addr=<G_ADDRESS>"`.
 - **It needs a USDC trustline,** signed by its own key:
-  `stellar tx new change-trust --source <NAME> --network testnet --line USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5`
+  `stellar tx new change-trust --source <NAME> --network testnet-relay --line USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5`
 
 Check both before anyone pays. The output should show `USDC` from issuer
 `GBBD47IF…`:
@@ -211,8 +224,12 @@ environment:
 | `OZ_API_KEY` | a mainnet key from https://channels.openzeppelin.com/gen |
 | `STELLAR_RECIPIENT` | a mainnet account with a USDC trustline |
 
-For `buy.mjs`, set `STELLAR_NETWORK=stellar:pubnet`. On mainnet that spends
-real USDC, so test on testnet first.
+To buy on mainnet from a cloud session, use the Privy wallet, only with the
+user's OK: `node ../privy-wallet/privy.mjs buy <url> --network mainnet --max 0.10`
+(it shows the price and pays only with `--yes`). `buy.mjs` needs the buyer's
+secret in `STELLAR_SECRET`, and a mainnet secret must never be in a cloud
+container. On your own machine, `buy.mjs` with `STELLAR_NETWORK=stellar:pubnet`
+works; it spends real USDC, so test on testnet first.
 
 ## Notes
 

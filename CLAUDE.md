@@ -1,7 +1,8 @@
 # Notes for Claude
 
-A sandbox for the [Stellar CLI for Agents](https://developers.stellar.org/docs/tools/cli/agent-cli),
-x402 payments, and a Privy-held mainnet wallet.
+A sandbox for the [Stellar CLI for Agents](https://developers.stellar.org/docs/tools/cli/agent-cli):
+wallets, x402 payments (buying and selling), and DeFi, on testnet and, with
+care, mainnet.
 
 ## Start here (every cloud session)
 
@@ -9,17 +10,19 @@ Run `/session-setup` (the command is in `.claude/commands/`), or do it by hand:
 
 ```bash
 scripts/session-start.sh [--mainnet]   # relays, networks, npm deps; builds the CLI in the background if missing
-~/.stellar-main/bin/stellar skill      # read it before the first stellar command
+stellar skill                          # read it before the first stellar command
 ```
 
-The CLI lives at `~/.stellar-main/bin/stellar` (built by `scripts/setup.sh`)
-and isn't on PATH. A fresh container has no CLI: the first run starts a 5 to
-15 minute background build (log `/tmp/try-cli-relays/cli-build.log`). Keep
-working and talking meanwhile, then re-run the script to add the networks.
+The CLI is built from `main` into `~/.stellar-main/bin/stellar` (by
+`scripts/setup.sh`), and `session-start.sh` links it onto PATH as `stellar`.
+A fresh container has no CLI: the first run starts a 5 to 15 minute background
+build (log `/tmp/try-cli-relays/cli-build.log`). Keep working and talking
+meanwhile, then re-run the script to add the networks.
 
-Why the relay: the CLI's RPC client ignores `HTTPS_PROXY`, so `--network testnet`
-gets `403`. The relay forwards through the proxy and also serves friendbot
-(`keys generate --fund` works). `testnet-relay` is real testnet: same
+Why the relays: the CLI's RPC client ignores `HTTPS_PROXY`, so `--network testnet`
+gets `403`. Use `--network testnet-relay` (and `mainnet-relay`, from
+`--mainnet`). The relay forwards through the proxy and also serves friendbot
+(`keys generate --fund` works). The relay networks are the real networks: same
 addresses, hashes, and stellar.expert links. Identities and networks live in
 `~/.config/stellar` and are lost with the container.
 
@@ -29,46 +32,48 @@ addresses, hashes, and stellar.expert links. Identities and networks live in
   transfer`/`approve`) on every command. Don't set defaults with `network use` /
   `keys use`, even though `stellar skill` suggests it.
 - Mainnet is read-only (`--send=no`, `network health`) unless the user says
-  otherwise. Never hold a mainnet key in the container.
-- Privy wallet (`privy-wallet/`, the secure/mainnet wallet): use
-  `PRIVY_APP_SECRET` only when the user asks for it in the current
-  conversation, for that task only. Never print, log or commit it; check for it
-  with `[ -n "$PRIVY_APP_SECRET" ]`. Show any mainnet transaction (operation,
-  amount, destination) and wait for an OK before signing. App ID:
-  `cmrpejbk700es0ckwpdu1hxcj`. Next steps are at the end of its README.
+  otherwise. Never hold a mainnet key in the container: mainnet signing and
+  mainnet x402 buying go through the Privy wallet only.
+- Privy wallet (`privy-wallet/`): use `PRIVY_APP_SECRET` only when the user
+  asks for it in the current conversation, for that task only. Never print, log
+  or commit it; check for it with `[ -n "$PRIVY_APP_SECRET" ]`. Show any
+  mainnet transaction (operation, amount, destination) and wait for an OK before
+  signing. App ID: `cmrpejbk700es0ckwpdu1hxcj`.
+- On mainnet, don't trust contract IDs from this repo's docs. They're dated
+  snapshots. Look the contract up (Raven MCP, the stellar.rgstry.xyz registry,
+  the protocol's own docs or API), check it on-chain (`contract invoke --send=no`,
+  e.g. a router's `get_factory` or a Blend pool's `get_config`), and simulate
+  before signing.
 - Report every transaction with its stellar.expert link:
   `https://stellar.expert/explorer/testnet/tx/<HASH>` (mainnet: `/public/`).
 
 ## What's here
 
-| Path | What |
-| --- | --- |
-| `scripts/setup.sh` | Builds the CLI from `main` into `~/.stellar-main` (started in the background by `session-start.sh`) |
-| `scripts/session-start.sh` | Per-session setup, run by `/session-setup` |
-| `scripts/rpc-relay.py` | `rpc-relay.py [port] [rpc-url]`, testnet by default |
-| `example-x402-seller/` | Live x402 seller ([/fortune](https://try-cli-jukj.onrender.com/fortune), 0.01 USDC) and `buy.mjs` |
-| `docs/` | DeFi directory (10 services, contract IDs) and tested testnet DeFi CLI recipes (Soroswap, Blend, DeFindex, classic DEX/AMM, CETES, gotchas), plus `mainnet-defi-cli.md`, an experimental record of Claude's mainnet session (not a guide) |
-| `privy-wallet/` | Privy-signed wallet: the CLI builds, `privy.mjs` signs with `--yes`, spending capped by a USDC allowance |
+| To | Read | Notes |
+| --- | --- | --- |
+| Hold and use a testnet wallet | `stellar skill`, then Networks and assets below | `keys generate --fund`, trustline, buy USDC on the DEX |
+| Use the Privy wallet (mainnet-safe) | `privy-wallet/README.md` | The CLI builds (`--build-only`), `privy.mjs sign` signs. It exists already (`wallet.json`); never `create` again |
+| Pay an x402 API | `example-x402-seller/README.md` (Try it) | Testnet: `buy.mjs`. Mainnet: `privy.mjs buy` only. Sellers to try: Rail402 below |
+| Sell with x402 | `example-x402-seller/README.md` | Run it locally; hosting on Render needs the user. `payTo`: the Privy wallet |
+| DeFi on testnet | `docs/testnet-defi-cli.md` | Tested recipes: Soroswap, Blend, DeFindex, classic DEX/AMM, CETES |
+| DeFi on mainnet | `docs/stellar-defi-directory.md` (Checking it yourself), then the mainnet rule above | `docs/mainnet-defi-cli.md` is only a record of one experimental session, not a guide |
+| See what was done before | `privy-wallet/LOG.md` | Every Privy transaction so far, with links |
+
+Scripts: `scripts/session-start.sh` (per session), `scripts/setup.sh` (builds
+the CLI), `scripts/rpc-relay.py [port] [rpc-url]` (testnet by default).
 
 ## Networks and assets
-
-Mainnet relay (SDF runs no public mainnet RPC):
-
-```bash
-python3 scripts/rpc-relay.py 8002 https://mainnet.sorobanrpc.com/ &
-$S network add mainnet-relay --rpc-url http://127.0.0.1:8002/ \
-  --network-passphrase "Public Global Stellar Network ; September 2015"
-```
 
 | USDC | Testnet | Mainnet |
 | --- | --- | --- |
 | Issuer | `GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5` | `GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN` |
 | SAC | `CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA` | `CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75` |
 
-Getting testnet USDC: `tx new change-trust --line USDC:<issuer>`, then swap XLM
+Getting testnet USDC: `tx new change-trust --line USDC:<issuer>`, then buy it
 on the DEX with `tx new path-payment-strict-receive --send-asset native
---dest-asset USDC:<issuer> --destination <self>` (amounts in stroops; about
-1 XLM per USDC).
+--send-max <stroops> --dest-asset USDC:<issuer> --dest-amount <stroops>
+--destination <self>` (about 1 XLM per USDC). `token balance` prints stroops
+(7 decimals): 1011561 is 0.1011561.
 
 ## Docs and references
 
@@ -89,8 +94,9 @@ on the DEX with `tx new path-payment-strict-receive --send-asset native
   contracts, payments and app code. Install the plugin only if asked. The
   "Community Built" skills aren't reviewed by SDF, so check with the user first.
 - **Raven MCP** (`https://raven.stellar.org/mcp`): docs plus live ecosystem
-  data. Only available if the user added it as a connector before the session
-  started (it needs browser OAuth). Otherwise fall back to `curl`.
+  data, the first place to look up mainnet protocols and contracts. Only
+  available if the user added it as a connector before the session started (it
+  needs browser OAuth). Otherwise fall back to `curl` and the registry.
 - **Rail402 Explorer** (testnet x402 marketplace):
   `curl -sS "https://explorer-explorer.up.railway.app/sellers?limit=50&registered=true"`.
   An unpaid `resource` returns 402, and its `payment-required` header is

@@ -21,7 +21,10 @@ if [ ! -x "$S" ]; then
   fi
   echo "  Re-run scripts/session-start.sh once $S exists to add the networks."
 else
-  echo "✓ $($S --version | head -1)"
+  # Put it on PATH as `stellar`, so commands read the same as with a released CLI.
+  mkdir -p ~/.local/bin
+  [ -e ~/.local/bin/stellar ] || ln -s "$S" ~/.local/bin/stellar
+  echo "✓ $($S --version | head -1) (as \`stellar\` via $(command -v stellar || echo 'nothing: add ~/.local/bin to PATH'))"
 fi
 
 relay() { # name port passphrase [rpc-url]
@@ -52,6 +55,11 @@ for dir in privy-wallet example-x402-seller; do
 done
 
 if [ -n "${PRIVY_APP_SECRET:-}" ]; then echo "✓ PRIVY_APP_SECRET is set (opt-in only, see CLAUDE.md)"; else echo "- PRIVY_APP_SECRET not set"; fi
-if [ -f privy-wallet/wallet.json ]; then echo "✓ Privy wallet: $(cd privy-wallet && node privy.mjs address)"; else echo "- no Privy wallet yet (privy-wallet/README.md, Next steps)"; fi
+if [ -f privy-wallet/wallet.json ]; then
+  addr=$(cd privy-wallet && node privy.mjs address 2>/dev/null)
+  # The CLI identity is address-only (no secret) and is lost with the container.
+  [ "$CLI_READY" = 1 ] && $S keys add privy-wallet --public-key "$addr" >/dev/null 2>&1
+  echo "✓ Privy wallet: $addr (CLI identity \`privy-wallet\`)"
+else echo "- no Privy wallet yet (privy-wallet/README.md, Next steps)"; fi
 [ "$CLI_READY" = 1 ] && echo "- CLI identities: $($S keys ls 2>/dev/null | tr '\n' ' ')"
 echo "- branch: $(git rev-parse --abbrev-ref HEAD)"
