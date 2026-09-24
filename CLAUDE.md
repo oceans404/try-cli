@@ -99,6 +99,19 @@ python3 scripts/rpc-relay.py 8002 https://mainnet.sorobanrpc.com/ &
   transaction or hold a mainnet key in the container without the user's
   explicit go-ahead; how mainnet keys are handled is still being decided.
 
+### Privy mainnet wallet: opt-in only
+
+The environment sets `PRIVY_APP_SECRET` for a Privy-held Stellar wallet (the
+secure/mainnet wallet; the key never leaves Privy). Its App ID is
+`cmrpejbk700es0ckwpdu1hxcj`. Testnet work uses plain CLI identities instead.
+
+- Don't use `PRIVY_APP_SECRET` unless the user asks for the Privy wallet in
+  the current conversation. Approval covers that task only, not later ones.
+- Never print, log, echo or commit it; read it only inside the signing code,
+  and check for it with `[ -n "$PRIVY_APP_SECRET" ]`.
+- Before any mainnet signature, show the user what will be signed (operation,
+  amount, destination) and wait for their OK.
+
 ## Stellar Skills (skills.stellar.org)
 
 Agent-readable guides for building on Stellar, beyond the CLI. The index is
