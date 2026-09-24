@@ -1,8 +1,8 @@
 # example-x402-seller
 
 A minimal paid API on Stellar using [x402](https://www.x402.org/).
-`GET /fortune` returns a one-line tip about Stellar, x402, or the Stellar CLI
-for $0.01 in USDC. Unpaid requests get HTTP 402 with the payment terms; a
+`GET /fortune` returns a fortune-cookie fortune with six lucky numbers for
+$0.01 in USDC. Unpaid requests get HTTP 402 with the payment terms; a
 facilitator verifies and settles each payment onchain and sponsors the network
 fee, so buyers need USDC but no XLM.
 
@@ -22,6 +22,7 @@ Rail402's [seller quickstart](https://docs.rail402.dev/sellers/quickstart).
 | File | What it is |
 | --- | --- |
 | `server.js` | The seller: Express + `@x402/express` gating `GET /fortune` |
+| `fortunes.js` | The fortunes (20 per topic) and the lucky-number picker |
 | `buy.mjs` | A buyer: `@x402/fetch` pays any Stellar x402 URL and prints the result |
 | `.env.example` | Settings to copy into `.env` |
 
@@ -82,16 +83,17 @@ Buy one with a funded identity that holds testnet USDC (a trustline, then swap
 XLM for USDC on the DEX with `stellar tx new path-payment-strict-send`):
 
 ```bash
-STELLAR_SECRET="$(stellar keys secret buyer)" npm run buy -- "http://localhost:3001/fortune?topic=x402"
+STELLAR_SECRET="$(stellar keys secret buyer)" npm run buy -- "http://localhost:3001/fortune?topic=luck"
 ```
 
 ```text
 status: 200
 payment-response: { success: true, payer: 'G…', transaction: '<HASH>', network: 'stellar:testnet' }
-body: {"fortune":"Read the challenge before you pay it.","topic":"x402","network":"stellar:testnet"}
+body: {"fortune":"A pleasant surprise is waiting for you.","topic":"luck","luckyNumbers":[3,12,19,27,34,41]}
 ```
 
-`topic` is optional (`stellar`, `x402`, or `cli`). Each run pays again.
+`topic` is optional (`wisdom`, `luck`, `love`, `work`, or `adventure`); the
+100 fortunes live in `fortunes.js`. Each run pays again.
 `buy.mjs` works on any Stellar x402 endpoint, not just this one.
 
 Verify on stellar.expert at `https://stellar.expert/explorer/testnet/tx/<HASH>`,

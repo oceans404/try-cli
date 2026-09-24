@@ -10,6 +10,7 @@ import { HTTPFacilitatorClient } from "@x402/core/server";
 import { ExactStellarScheme } from "@x402/stellar/exact/server";
 import { bazaarResourceServerExtension } from "@x402/extensions/bazaar";
 import { describeEndpoint } from "@rail402.dev/sdk";
+import { FORTUNES, TOPICS, luckyNumbers } from "./fortunes.js";
 
 const NETWORK = process.env.STELLAR_NETWORK || "stellar:testnet";
 const FACILITATOR_URL = process.env.FACILITATOR_URL || "https://channels.openzeppelin.com/x402/testnet";
@@ -37,12 +38,7 @@ const resourceServer = new x402ResourceServer(facilitator)
   // Discovery metadata; Rail402 catalogs it when a payment settles.
   .registerExtension(bazaarResourceServerExtension);
 
-const FORTUNES = {
-  stellar: ["Seven decimals, not six.", "A trustline today saves an op_no_trust tomorrow."],
-  x402: ["Read the challenge before you pay it.", "Every paid call pays again. Keep the response."],
-  cli: ["Never retry a timed-out write blindly.", "`tx new` is silent on success. Check the balance."],
-};
-const TOPICS = Object.keys(FORTUNES);
+
 
 const app = express();
 // Behind a TLS-terminating proxy (Render, Fly, etc.), trust X-Forwarded-Proto so
@@ -64,20 +60,20 @@ app.use(
         // serviceName and tags are the highest-weighted fields in Rail402's search,
         // and the explorer's registered-sellers list shows named services.
         serviceName: "Stellar Fortunes",
-        tags: ["fortune", "stellar", "x402", "cli", "tips"],
-        description: "A one-line fortune with a practical tip about building on Stellar, x402, or the Stellar CLI.",
+        tags: ["fortune", "fortune-cookie", "lucky-numbers", "wisdom", "fun"],
+        description: "A fortune-cookie fortune with six lucky numbers. Pick a topic (wisdom, luck, love, work, adventure) or get a random one.",
         mimeType: "application/json",
         extensions: describeEndpoint({
           params: {
             topic: {
-              description: "What the tip is about: stellar (the network), x402 (paid APIs), or cli (the Stellar CLI). Random if omitted.",
+              description: "Kind of fortune: wisdom, luck, love, work, or adventure. Random if omitted.",
               type: "string",
               required: false,
-              example: "x402",
+              example: "luck",
               enum: TOPICS,
             },
           },
-          outputExample: { fortune: "Read the challenge before you pay it.", topic: "x402", network: "stellar:testnet" },
+          outputExample: { fortune: "A pleasant surprise is waiting for you.", topic: "luck", luckyNumbers: [3, 12, 19, 27, 34, 41] },
         }),
       },
     },
@@ -88,7 +84,7 @@ app.use(
 app.get("/fortune", (req, res) => {
   const topic = TOPICS.includes(req.query.topic) ? req.query.topic : TOPICS[Math.floor(Math.random() * TOPICS.length)];
   const list = FORTUNES[topic];
-  res.json({ fortune: list[Math.floor(Math.random() * list.length)], topic, network: NETWORK });
+  res.json({ fortune: list[Math.floor(Math.random() * list.length)], topic, luckyNumbers: luckyNumbers() });
 });
 
 app.listen(PORT, () => console.log(`x402 seller on http://localhost:${PORT} (${NETWORK}, facilitator ${FACILITATOR_URL})`));
