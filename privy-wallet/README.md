@@ -148,6 +148,26 @@ What the mock can't prove is Privy's side: that `raw_sign` accepts the
 request and returns a signature for the wallet's address. `privy.mjs` checks
 every signature against the address before using it.
 
+## Status and next steps (2026-09-24)
+
+Everything above ran against the mock. Still to do, in a session that has
+`PRIVY_APP_SECRET` and the user's go-ahead to use it:
+
+1. Start the testnet relay and `testnet-relay` network (`../CLAUDE.md`), then
+   `npm install` here.
+2. Check the secret without printing it: `[ -n "$PRIVY_APP_SECRET" ] && echo set`.
+3. `node privy.mjs create --app-id cmrpejbk700es0ckwpdu1hxcj`, then commit
+   `wallet.json` so later sessions reuse the wallet instead of making another.
+4. Repeat the testnet dry run with the real wallet: fund it with friendbot
+   (`stellar keys add privy-wallet --public-key ...`, then `stellar keys fund`),
+   add the trustline, have a testnet "main wallet" grant an allowance, pull
+   with `transfer_from`, then `buy` the fortune. The CLI identities from the
+   first dry run (`my-wallet` etc.) lived in an earlier container and are gone,
+   so make a new main wallet with testnet USDC (trustline, then a
+   `path-payment-strict-receive` swap from XLM).
+5. Only then talk to the user about mainnet: funding, and the allowance from
+   their real main wallet, which they sign themselves.
+
 ## Gotcha
 
 stellar-sdk 17 returns `Uint8Array`s (from `tx.hash()`, `Keypair.sign()`) and
