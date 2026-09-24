@@ -43,9 +43,6 @@ waived for this session only, within these limits:
 | 01:49 | testnet | Privy wallet `transfer_from` 0.6 USDC out of the allowance | Allowance 1 → 0.4. [73f8b282…](https://stellar.expert/explorer/testnet/tx/73f8b282fdfbaebc9ce416a7579ec4ca842f856dcf25e912526312450a8278a0) |
 | 01:49 | testnet | Over-cap pull: `transfer_from` 0.5 with 0.4 left | Rejected in simulation: `Error(Contract, #9)` "not enough allowance to spend", nothing signed. The cap holds |
 | 01:50 | testnet | `node privy.mjs buy .../fortune` (x402, 0.01 USDC). Privy signs the auth entry | 200 OK, "The wise listen twice as much as they speak." [b4061f8c…](https://stellar.expert/explorer/testnet/tx/b4061f8c79b2eb3e100e266274e4a60bbc5b056273ca64c172ffffae76ed4f22) |
-
-**Privy works end to end with the real Privy (not the mock):** classic ops, contract
-calls, allowance pulls and x402 auth entries, on testnet and mainnet.
 | 01:50 | testnet | Soroswap `add_liquidity` 1 USDC + ≤10 XLM, then `remove_liquidity` all 29,175,270 LP | Both landed, LP back to 0. [add](https://stellar.expert/explorer/testnet/tx/268216b6977bb8bc298f9ddf26ec9a24f74612478230856bf3c2765f7cb8f036), [remove](https://stellar.expert/explorer/testnet/tx/06adaf64b355f51d7b45a933f3c4d600c75c46c4baddff5cdf618f45d215d7e5) |
 | 01:50 | mainnet | Soroswap USDC/XLM pair `CAM7DY53…OABP` (reserves 313,288 XLM / 62,932 USDC ≈ 4.98 XLM per USDC): `add_liquidity` 0.5 USDC + ~2.49 XLM, 5% slippage floors, fee 0.037 XLM | 9,657,898 LP tokens. Left open to earn fees. [d8cb0d5a…](https://stellar.expert/explorer/public/tx/d8cb0d5a620532dec828257cd02eae83c2eb7b00e743391a6569d77541ccc1ec) |
 | 01:51 | testnet | Classic order book: resting `manage-sell-offer` 1 USDC @ 100 XLM, then cancel (`--amount 0 --offer-id`) | [place](https://stellar.expert/explorer/testnet/tx/7d15451b1eac7e1875ba1bb819a7298c0753fdcfb54bbb4e6a82320afb133958), [cancel](https://stellar.expert/explorer/testnet/tx/464bafbeaf027823a6a1caf0f9758adf451a26daa0b7317d78a54bc2bdae128b) |
@@ -60,6 +57,9 @@ calls, allowance pulls and x402 auth entries, on testnet and mainnet.
 | 02:28 | mainnet | Rebuilt with fresh minimums and a 10-min deadline (was 5), resent | Got ~0.4994 USDC + ~2.49 XLM back, LP 0. [21642c30…](https://stellar.expert/explorer/public/tx/21642c300415598c1a358686a2f7a7aae03c5ac007b6f8faa8a28469448a3213) |
 | 02:28 | mainnet | Classic AMM withdraw 0.1661973 shares, 99% minimums (the summary now shows them) | [459aef49…](https://stellar.expert/explorer/public/tx/459aef49d682b7ebea40500caad135ab90c34c700c06f301e2cb5f58e7eb4165) |
 | 02:29 | mainnet | Remove the pool-share trustline (`limit` 0), frees 1 XLM reserve | [4e2e2809…](https://stellar.expert/explorer/public/tx/4e2e280984c06ec145aeb3c2c1e02433f4ec9c5023ad9cbff452e8f7ea7b1aac) |
+
+**Privy works end to end with the real Privy (not the mock):** classic ops, contract
+calls, allowance pulls and x402 auth entries, on testnet and mainnet.
 
 ## Tally (02:30 UTC)
 
