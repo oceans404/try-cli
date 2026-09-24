@@ -1,7 +1,7 @@
 #!/bin/bash
-# Environment setup for Claude Code cloud sessions: builds the Stellar CLI from
-# GitHub `main`, as the "Stellar CLI for Agents" quickstart requires while the
-# agent features are in developer preview.
+# Builds the Stellar CLI from GitHub `main` into ~/.stellar-main (5-15 min cold),
+# as the "Stellar CLI for Agents" quickstart requires while the agent features
+# are in developer preview. scripts/session-start.sh runs it in the background.
 set -euo pipefail
 
 # The secure-store (dbus) and Ledger (udev) crates need these headers on Linux.

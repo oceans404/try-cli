@@ -19,14 +19,15 @@ wallet for mainnet.
 environment needs, ahead of time. Set it in the environment's settings, not in
 a file:
 
-- **Setup script:** `scripts/setup.sh` (builds the Stellar CLI, 5 to 15 minutes cold)
+- **Setup script:** leave it empty. A setup script blocks the session while it
+  runs, and the CLI build takes 5 to 15 minutes.
 - **Environment variables:** `PRIVY_APP_SECRET` (optional, for `privy-wallet/`) and `NODE_USE_ENV_PROXY=1`
 - **Network access:** the hosts listed in the file
 - **Connector (optional):** Raven MCP
 
 Then start each session with `/session-setup`. It runs
-`scripts/session-start.sh` (relays, networks, deps) and reports what's ready
-and what's next.
+`scripts/session-start.sh` (relays, networks, deps; seconds), starts the CLI
+build in the background if needed, and reports what's ready and what's next.
 
 ## Agent resources
 

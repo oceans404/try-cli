@@ -8,12 +8,14 @@ x402 payments, and a Privy-held mainnet wallet.
 Run `/session-setup` (the command is in `.claude/commands/`), or do it by hand:
 
 ```bash
-scripts/session-start.sh [--mainnet]   # relays, CLI networks, npm deps; safe to re-run
+scripts/session-start.sh [--mainnet]   # relays, networks, npm deps; builds the CLI in the background if missing
 ~/.stellar-main/bin/stellar skill      # read it before the first stellar command
 ```
 
 The CLI lives at `~/.stellar-main/bin/stellar` (built by `scripts/setup.sh`)
-and isn't on PATH.
+and isn't on PATH. A fresh container has no CLI: the first run starts a 5 to
+15 minute background build (log `/tmp/try-cli-relays/cli-build.log`). Keep
+working and talking meanwhile, then re-run the script to add the networks.
 
 Why the relay: the CLI's RPC client ignores `HTTPS_PROXY`, so `--network testnet`
 gets `403`. The relay forwards through the proxy and also serves friendbot
@@ -41,7 +43,7 @@ addresses, hashes, and stellar.expert links. Identities and networks live in
 
 | Path | What |
 | --- | --- |
-| `scripts/setup.sh` | Builds the CLI from `main` into `~/.stellar-main` (environment setup script) |
+| `scripts/setup.sh` | Builds the CLI from `main` into `~/.stellar-main` (started in the background by `session-start.sh`) |
 | `scripts/session-start.sh` | Per-session setup, run by `/session-setup` |
 | `scripts/rpc-relay.py` | `rpc-relay.py [port] [rpc-url]`, testnet by default |
 | `example-x402-seller/` | Live x402 seller ([/fortune](https://try-cli-jukj.onrender.com/fortune), 0.01 USDC) and `buy.mjs` |

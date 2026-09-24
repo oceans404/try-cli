@@ -6,11 +6,15 @@ argument-hint: "[--mainnet] [what to work on]"
 Set up this session for the try-cli repo, then report back briefly.
 
 1. Run `scripts/session-start.sh` (add `--mainnet` if "$ARGUMENTS" mentions
-   mainnet). It checks the CLI, starts the RPC relays, adds the
+   mainnet). It takes seconds. It starts the RPC relays, adds the
    `testnet-relay`/`mainnet-relay` networks, runs `npm install`, and reports
-   whether `PRIVY_APP_SECRET` and a Privy wallet exist. If the CLI is missing,
-   run `scripts/setup.sh` in the background and tell the user it takes 5 to 15
-   minutes.
+   whether `PRIVY_APP_SECRET` and a Privy wallet exist. If the CLI isn't built
+   yet, it starts the build in the background (5 to 15 minutes). In that
+   case, run this as a background Bash command, so you're notified when it
+   finishes and can keep talking to the user meanwhile:
+   `until [ -x ~/.stellar-main/bin/stellar ]; do sleep 30; done; scripts/session-start.sh`.
+   Until it's done, skip step 2 and any `stellar` commands, and work on
+   whatever doesn't need the CLI.
 2. Run `~/.stellar-main/bin/stellar skill` and read it (CLAUDE.md says to).
 3. Check the branch. If `privy-wallet/` or `docs/testnet-defi-cli.md` is
    missing, this checkout predates that work: say so, and offer to check out

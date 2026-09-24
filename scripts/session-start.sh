@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Get a cloud session ready: RPC relays, CLI networks, npm deps. Safe to re-run.
+# Get a cloud session ready: RPC relays, CLI networks, npm deps. Safe to re-run,
+# and quick: if the Stellar CLI isn't built yet, the build starts in the
+# background (5-15 min) and the session stays responsive. Re-run once it's done.
 # Usage: scripts/session-start.sh [--mainnet]   (--mainnet also starts the read-only mainnet relay)
 set -u
 cd "$(dirname "$0")/.."
@@ -7,11 +9,20 @@ S=~/.stellar-main/bin/stellar
 LOGS=/tmp/try-cli-relays
 mkdir -p "$LOGS"
 
+CLI_READY=1
 if [ ! -x "$S" ]; then
-  echo "✗ Stellar CLI missing at $S. Run scripts/setup.sh (5-15 min) or add it as the environment's setup script."
-  exit 1
+  CLI_READY=0
+  if [ -f "$LOGS/cli-build.pid" ] && kill -0 "$(cat "$LOGS/cli-build.pid")" 2>/dev/null; then
+    echo "… Stellar CLI build already running (log $LOGS/cli-build.log)"
+  else
+    nohup bash scripts/setup.sh >"$LOGS/cli-build.log" 2>&1 &
+    echo $! >"$LOGS/cli-build.pid"
+    echo "… Stellar CLI not built yet: building in the background, 5-15 min (log $LOGS/cli-build.log)"
+  fi
+  echo "  Re-run scripts/session-start.sh once $S exists to add the networks."
+else
+  echo "✓ $($S --version | head -1)"
 fi
-echo "✓ $($S --version | head -1)"
 
 relay() { # name port passphrase [rpc-url]
   local name=$1 port=$2 pass=$3 url=${4:-}
@@ -20,6 +31,7 @@ relay() { # name port passphrase [rpc-url]
     nohup python3 scripts/rpc-relay.py "$port" $url >"$LOGS/$name.log" 2>&1 &
     for _ in 1 2 3 4 5; do sleep 1; curl -s -m 2 -o /dev/null "http://127.0.0.1:$port/" && break; done
   fi
+  if [ "$CLI_READY" = 0 ]; then echo "✓ relay :$port up ($name gets added once the CLI is built)"; return; fi
   $S network add "$name" --rpc-url "http://127.0.0.1:$port/" --network-passphrase "$pass"
   if $S network health --network "$name" >/dev/null 2>&1; then
     echo "✓ $name healthy (relay on :$port, log $LOGS/$name.log)"
@@ -41,5 +53,5 @@ done
 
 if [ -n "${PRIVY_APP_SECRET:-}" ]; then echo "✓ PRIVY_APP_SECRET is set (opt-in only, see CLAUDE.md)"; else echo "- PRIVY_APP_SECRET not set"; fi
 if [ -f privy-wallet/wallet.json ]; then echo "✓ Privy wallet: $(cd privy-wallet && node privy.mjs address)"; else echo "- no Privy wallet yet (privy-wallet/README.md, Next steps)"; fi
-echo "- CLI identities: $($S keys ls 2>/dev/null | tr '\n' ' ')"
+[ "$CLI_READY" = 1 ] && echo "- CLI identities: $($S keys ls 2>/dev/null | tr '\n' ' ')"
 echo "- branch: $(git rev-parse --abbrev-ref HEAD)"
