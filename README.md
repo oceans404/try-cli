@@ -19,24 +19,19 @@ and only with a person's OK.
 | [`privy-wallet/`](privy-wallet) | A Stellar wallet whose key is held by [Privy](https://privy.io), not by the agent. The CLI builds transactions and `privy.mjs` shows and signs them; a USDC allowance caps spending. [`LOG.md`](privy-wallet/LOG.md) records every transaction it has made |
 | [`docs/`](docs) | A directory of 10 Stellar DeFi services and how to check them yourself, and CLI recipes tested on testnet (Soroswap, Blend, DeFindex, classic DEX/AMM, CETES). Also an experimental record of one hour of mainnet DeFi by Claude, kept to show how it went, not as a guide |
 | [`scripts/`](scripts) | `session-start.sh` readies a session, `setup.sh` builds the CLI, `rpc-relay.py` lets the CLI reach Stellar through the cloud proxy |
+| [`HUMANS.md`](HUMANS.md) | Setting the repo up in Claude Code: prerequisites, environment settings, first session |
 | [`CLAUDE.md`](CLAUDE.md) | Instructions and rules for agents working in this repo |
 | [`.env.claudecode`](.env.claudecode) | What the cloud environment needs (variables, setup script, hosts) |
 
 ## Cloud session setup
 
-[`.env.claudecode`](.env.claudecode) lists everything a Claude Code cloud
-environment needs, ahead of time. Set it in the environment's settings, not in
-a file:
-
-- **Setup script:** leave it empty. A setup script blocks the session while it
-  runs, and the CLI build takes 5 to 15 minutes.
-- **Environment variables:** `PRIVY_APP_SECRET` (optional, for `privy-wallet/`) and `NODE_USE_ENV_PROXY=1`
-- **Network access:** the hosts listed in the file
-- **Connector (optional):** Raven MCP
-
-Then start each session with `/session-setup`. It runs
-`scripts/session-start.sh` (relays, networks, deps; seconds), starts the CLI
-build in the background if needed, and reports what's ready and what's next.
+See **[HUMANS.md](HUMANS.md)**. It covers the prerequisites (Privy App ID and
+secret, the Raven connector), the cloud environment settings (environment
+variables, network access, setup script), and how to start. In short:
+- leave the environment's setup script empty;
+- set `PRIVY_APP_SECRET` and `NODE_USE_ENV_PROXY=1`;
+- allow the Stellar, Privy and x402 hosts;
+- start each session with `/session-setup`.
 
 ## Agent resources
 
