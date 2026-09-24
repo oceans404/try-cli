@@ -79,6 +79,26 @@ Raven connector itself goes through claude.ai, not this list.
    the background if needed (5 to 15 minutes on a fresh container). Claude
    keeps talking meanwhile, then reports what's ready.
 
+### What to tell Claude
+
+Make your first message `/session-setup` followed by what you want. Name the
+network, and say explicitly if Claude may use the Privy wallet. It won't
+touch it otherwise.
+
+| Goal | First message |
+| --- | --- |
+| Just get ready | `/session-setup` |
+| Explore testnet | `/session-setup create and fund a testnet wallet with some USDC, then show me what we can buy on Rail402` |
+| Testnet DeFi | `/session-setup rerun the recipes in docs/testnet-defi-cli.md with a new testnet wallet and tell me what still works` |
+| Sell over x402 | `/session-setup run example-x402-seller locally on testnet and buy from it with buy.mjs` |
+| Privy wallet, testnet | `/session-setup use the Privy wallet on testnet, you have my OK. Check its balances and pay for one fortune with privy.mjs buy` |
+| Privy wallet, mainnet | `/session-setup you may use the Privy wallet on mainnet for this task. Budget: at most 1 USDC. Show me each transaction before signing` |
+| Continue earlier work | `/session-setup read privy-wallet/LOG.md and the Next steps in privy-wallet/README.md, then tell me what's left` |
+
+For mainnet, spell out what Claude may spend, in total and per transaction,
+and on what. Approval lasts for that task only, so say it again in a new
+session.
+
 ## What Claude will and won't do
 
 - **Testnet:** it creates and funds its own wallets and transacts freely.
