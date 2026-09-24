@@ -45,6 +45,10 @@ const FORTUNES = {
 const TOPICS = Object.keys(FORTUNES);
 
 const app = express();
+// Behind a TLS-terminating proxy (Render, Fly, etc.), trust X-Forwarded-Proto so
+// the challenge advertises https://. @x402/express builds the resource URL from
+// req.protocol, and Rail402's Bazaar lists whatever URL the paid challenge carries.
+app.set("trust proxy", true);
 
 app.use(
   paymentMiddleware(

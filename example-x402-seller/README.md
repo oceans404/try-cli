@@ -104,6 +104,67 @@ stellar tx fetch events --hash <HASH> --network testnet
 The USDC `transfer` event should name the buyer, your `payTo`, and `100000`
 (0.01 USDC at 7 decimals).
 
+## Hosting on Render
+
+Create a **Web Service** on [Render](https://render.com) from this repository.
+Render builds from the branch you pick, so push your changes first.
+
+| Setting | Value |
+| --- | --- |
+| Language | **Node** (the form may default to Python 3) |
+| Branch | the branch with your changes, e.g. `main` |
+| Root Directory | `example-x402-seller` |
+| Build Command | `npm install` |
+| Start Command | `npm start` |
+| Instance Type | **Free** is enough for a demo (the form may preselect a paid one) |
+
+Environment variables:
+
+| Key | Value |
+| --- | --- |
+| `STELLAR_NETWORK` | `stellar:testnet` |
+| `FACILITATOR_URL` | `https://facilitator.rail402.dev` (or the OZ Channels URL) |
+| `STELLAR_RECIPIENT` | your `payTo` address (see below) |
+| `OZ_API_KEY` | only for OZ Channels |
+
+Don't set `PORT`; Render provides it and `server.js` reads it. Free instances
+sleep when idle, so the first request after a pause can take a minute.
+Changing an environment variable redeploys the service.
+
+### The recipient (`payTo`)
+
+- **Use an identity you keep.** Whoever holds its secret key controls the
+  earnings and owns the Rail402 listing. Don't use a throwaway key from a
+  temporary machine or session.
+- **It must exist onchain.** A key from `stellar keys generate` without
+  `--fund` is not an account yet. Fund it with
+  `stellar keys fund <NAME> --network testnet`, or friendbot:
+  `curl "https://friendbot.stellar.org/?addr=<G_ADDRESS>"`.
+- **It needs a USDC trustline,** signed by its own key:
+  `stellar tx new change-trust --source <NAME> --network testnet --line USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5`
+
+Check both before anyone pays. The output should show `USDC` from issuer
+`GBBD47IF…`:
+
+```bash
+curl -s https://horizon-testnet.stellar.org/accounts/<G_ADDRESS> | grep -E '"asset_(code|issuer)"'
+```
+
+A `404` means the account isn't funded yet.
+
+### Check the deployed service
+
+```bash
+curl -s -D - -o /dev/null https://<your-service>.onrender.com/fortune \
+  | grep -i '^payment-required:' | sed 's/^[^:]*: //' | tr -d '\r' | base64 -d
+```
+
+Expect HTTP 402 with your address as `payTo`, `areFeesSponsored: true`, and a
+`resource.url` that starts with **`https://`**. Render terminates TLS at its
+proxy, so `server.js` sets `app.set("trust proxy", true)`; without it the
+challenge advertises `http://`, and that's the URL a Bazaar listing would
+record.
+
 ## Listing on Rail402
 
 With the Rail402 facilitator, the route's discovery metadata (the description
@@ -113,36 +174,27 @@ listing is owned by the `payTo` that got paid, and it ranks higher with more
 distinct buyers; paying yourself adds no ranking. See Rail402's
 [Get discovered](https://docs.rail402.dev/sellers/get-discovered).
 
-**Deploy to a public URL before the first payment.** The catalog records the
-URL the buyer paid. A payment against `http://localhost:3001` publishes a dead
-localhost listing.
+Before the first payment:
 
-Once a payment settles, confirm the listing:
+1. **Deploy to a public URL.** The catalog records the URL the buyer paid, so
+   paying `http://localhost:3001` publishes a dead listing.
+2. **Check the challenge** as above: `https://` resource URL, your `payTo`.
+3. **Pay the plain route** (`/fortune`, no `?topic=`). The resource URL is
+   built from the full request URL, query string included.
+4. **Buy from a different account** than the recipient.
+
+```bash
+STELLAR_SECRET="$(stellar keys secret buyer)" npm run buy -- https://<your-service>.onrender.com/fortune
+```
+
+Then confirm the listing:
 
 ```bash
 curl -s "https://facilitator.rail402.dev/discovery/resources?payTo=<YOUR_G_ADDRESS>"
 ```
 
-## Hosting on Render
-
-Create a **Web Service** on [Render](https://render.com) from this repository:
-
-| Setting | Value |
-| --- | --- |
-| Root Directory | `example-x402-seller` |
-| Build Command | `npm install` |
-| Start Command | `npm start` |
-| Environment variables | `STELLAR_NETWORK`, `STELLAR_RECIPIENT`, `FACILITATOR_URL`, and `OZ_API_KEY` for OZ Channels |
-
-Don't set `PORT`; Render provides it and `server.js` reads it. Render's free
-instances sleep when idle, so the first request after a pause is slow.
-
-Then check the public 402 and buy from the public URL:
-
-```bash
-curl -s -o /dev/null -w "%{http_code}\n" https://<your-service>.onrender.com/fortune   # 402
-STELLAR_SECRET="$(stellar keys secret buyer)" npm run buy -- https://<your-service>.onrender.com/fortune
-```
+It should also appear in the explorer's
+[registered sellers](https://explorer.rail402.dev/testnet/sellers?registered=true).
 
 ## Going to mainnet
 
