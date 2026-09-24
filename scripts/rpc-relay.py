@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Localhost relay so the Stellar CLI can reach testnet from a cloud session.
+"""Localhost relay so the Stellar CLI can reach Stellar RPC from a cloud session.
 
 The CLI's RPC client (jsonrpsee) ignores HTTPS_PROXY, and cloud sessions only
 allow outbound traffic through that proxy. This relay accepts plain HTTP on
@@ -7,13 +7,14 @@ allow outbound traffic through that proxy. This relay accepts plain HTTP on
 reads it, and SSL_CERT_FILE supplies the proxy's CA), so the environment's
 egress policy still applies to every request.
 
-  POST /           -> https://soroban-testnet.stellar.org/  (JSON-RPC)
-  GET  /friendbot  -> https://friendbot.stellar.org/        (funding)
+  POST /           -> the RPC URL (default https://soroban-testnet.stellar.org/)
+  GET  /friendbot  -> https://friendbot.stellar.org/  (testnet default only)
 
 getNetwork responses get their friendbotUrl pointed back at this relay, since
 the CLI's own HTTP client may not trust the proxy's CA.
 
-Usage: python3 scripts/rpc-relay.py [port]   (default 8001)
+Usage: python3 scripts/rpc-relay.py [port] [rpc-url]   (default 8001, testnet)
+  e.g. python3 scripts/rpc-relay.py 8002 https://mainnet.sorobanrpc.com/
 """
 import json
 import sys
@@ -21,9 +22,11 @@ import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-RPC = "https://soroban-testnet.stellar.org/"
-FRIENDBOT = "https://friendbot.stellar.org/"
+TESTNET_RPC = "https://soroban-testnet.stellar.org/"
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8001
+RPC = sys.argv[2] if len(sys.argv) > 2 else TESTNET_RPC
+# Friendbot only exists on testnet; don't offer it when relaying anything else.
+FRIENDBOT = "https://friendbot.stellar.org/" if RPC == TESTNET_RPC else None
 LOCAL = f"http://127.0.0.1:{PORT}"
 
 
@@ -55,7 +58,7 @@ class Relay(BaseHTTPRequestHandler):
         status, ctype, data = self._forward(RPC, "POST", body)
         try:
             msg = json.loads(data)
-            if isinstance(msg, dict) and isinstance(msg.get("result"), dict) and "friendbotUrl" in msg["result"]:
+            if FRIENDBOT and isinstance(msg, dict) and isinstance(msg.get("result"), dict) and "friendbotUrl" in msg["result"]:
                 msg["result"]["friendbotUrl"] = f"{LOCAL}/friendbot"
                 data = json.dumps(msg).encode()
         except ValueError:
@@ -63,7 +66,7 @@ class Relay(BaseHTTPRequestHandler):
         self._reply(status, ctype, data)
 
     def do_GET(self):
-        if self.path.startswith("/friendbot"):
+        if FRIENDBOT and self.path.startswith("/friendbot"):
             query = self.path.split("?", 1)[1] if "?" in self.path else ""
             self._reply(*self._forward(f"{FRIENDBOT}?{query}", "GET"))
         else:
@@ -74,5 +77,6 @@ class Relay(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print(f"relaying {LOCAL} -> {RPC} (and /friendbot) via HTTPS_PROXY", file=sys.stderr)
+    extra = " (and /friendbot)" if FRIENDBOT else ""
+    print(f"relaying {LOCAL} -> {RPC}{extra} via HTTPS_PROXY", file=sys.stderr)
     ThreadingHTTPServer(("127.0.0.1", PORT), Relay).serve_forever()

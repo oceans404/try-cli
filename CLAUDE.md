@@ -79,6 +79,26 @@ python3 scripts/rpc-relay.py 8001 &    # run in the background; one per session
 - If the relay itself logs a 403, check for Cloudflare `error code: 1010`
   (it blocks some User-Agents) before blaming the network policy.
 
+### Reaching mainnet (read-only until the user says otherwise)
+
+The relay takes an RPC URL as a second argument. SDF runs no public mainnet
+RPC, so use a provider; `https://mainnet.sorobanrpc.com/` works through the
+session's proxy. Run it on its own port next to the testnet relay:
+
+```bash
+python3 scripts/rpc-relay.py 8002 https://mainnet.sorobanrpc.com/ &
+~/.stellar-main/bin/stellar network add mainnet-relay \
+  --rpc-url http://127.0.0.1:8002/ --network-passphrase "Public Global Stellar Network ; September 2015"
+~/.stellar-main/bin/stellar network health --network mainnet-relay
+```
+
+- Friendbot is testnet only; the mainnet relay answers `/friendbot` with 404.
+- Mainnet USDC: issuer `GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN`,
+  SAC `CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75`.
+- Reads (`--send=no`, `network health`) are fine. Don't submit a mainnet
+  transaction or hold a mainnet key in the container without the user's
+  explicit go-ahead; how mainnet keys are handled is still being decided.
+
 ## Stellar Skills (skills.stellar.org)
 
 Agent-readable guides for building on Stellar, beyond the CLI. The index is
