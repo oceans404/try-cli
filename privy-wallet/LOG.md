@@ -55,3 +55,54 @@ calls, allowance pulls and x402 auth entries, on testnet and mainnet.
 | 01:56 | mainnet | Classic AMM XLM/USDC pool `a468d41d…` (`LCSGRVA5…IQQUG`, 30 bp, ≈4.99 XLM per USDC): pool-share trustline (1 XLM reserve), then deposit ≤0.5 XLM + ≤0.1 USDC, price band 4.7–5.3 | 0.1661973 shares. [trust](https://stellar.expert/explorer/public/tx/e1a155164ad009afdc88f7cd62928254918f8c221e90f142d3c87133186a1a7a), [deposit](https://stellar.expert/explorer/public/tx/54a2c0db5e8aa5d0c4c7ef822f0a487acfe861812b48e9e0eddf9460ffdb1de6) |
 | 01:56 | — | **Found a gap in `privy.mjs`:** the summary for `liquidityPoolDeposit` showed only the op type, no amounts or prices. I checked the mainnet deposit with `tx decode` before signing. Fixed `describeOp` to show pool id, max amounts, price band and withdraw minimums, with a self-test that fails without the fix | Committed |
 | 01:58 | mainnet | Research, read-only: Aquarius API. Its XLM/USDC pool `CBBMQBNH…BUCV` is concentrated liquidity, 0.10% fee, ~$1.46M liquidity, reported APY 20.5% + 4.2% AQUA rewards (Aquarius's own figures) | Not traded: no testnet deployment to rehearse on |
+| 02:25 | mainnet | Blend: position worth 2.0000110 USDC after 40 min (earned 0.000011). Withdraw all (asked 2.1, capped) | Position empty. [835132f3…](https://stellar.expert/explorer/public/tx/835132f39c25dd44c45d39d76cfd71a3571e18b9ae609a4d4dead1a98ce29af3). My slip: my grep showed only the function name, not the request list, before signing. Read full summaries after that |
+| 02:26 | mainnet | Soroswap `remove_liquidity`, 99% minimums | **Dropped:** `tx send` returned "transaction submission timeout"; the tx never reached the ledger (`tx fetch result` and Horizon: not found), no fee charged. [7cbb0eb4…](https://stellar.expert/explorer/public/tx/7cbb0eb4e67ca8c117ba90a73080f3cfce972050326458764cd742c2e14b20ac) |
+| 02:28 | mainnet | Rebuilt with fresh minimums and a 10-min deadline (was 5), resent | Got ~0.4994 USDC + ~2.49 XLM back, LP 0. [21642c30…](https://stellar.expert/explorer/public/tx/21642c300415598c1a358686a2f7a7aae03c5ac007b6f8faa8a28469448a3213) |
+| 02:28 | mainnet | Classic AMM withdraw 0.1661973 shares, 99% minimums (the summary now shows them) | [459aef49…](https://stellar.expert/explorer/public/tx/459aef49d682b7ebea40500caad135ab90c34c700c06f301e2cb5f58e7eb4165) |
+| 02:29 | mainnet | Remove the pool-share trustline (`limit` 0), frees 1 XLM reserve | [4e2e2809…](https://stellar.expert/explorer/public/tx/4e2e280984c06ec145aeb3c2c1e02433f4ec9c5023ad9cbff452e8f7ea7b1aac) |
+
+## Tally (02:30 UTC)
+
+| | XLM |
+| --- | --- |
+| Started with | 30.0000000 |
+| Now: 16.9405098 XLM + 2.6006328 USDC (sells for 12.958 XLM on the DEX) | ≈ 29.8986 |
+| Fees, 14 mainnet txs (1 failed) | 0.0906 |
+| Everything else (spreads, rounding) | ≈ 0.01 |
+
+All positions are closed: no Blend supply, no LP tokens, no offers. What's left
+is XLM, USDC, and the USDC trustline (0.5 XLM of the XLM is its reserve).
+Whether to sell the USDC back to XLM is the user's call.
+
+### What I learned
+
+- **Privy works for real** with the CLI (`--build-only | tx simulate | privy.mjs
+  sign | tx send`), for classic ops, contract calls, allowance pulls and x402,
+  on both networks. The on-chain allowance cap rejects over-cap pulls.
+- **`privy.mjs` summary gap, fixed:** liquidity pool ops showed only their type.
+  Always check that a summary actually shows the amounts before `--yes`.
+- **Mainnet yields over an hour are noise:** 2 USDC in Blend earned 0.000011.
+  Fees (≈0.09 XLM) dwarf it. Positions only make sense held for weeks.
+- **Blend mainnet:** Fixed and YieldBlox are On Ice (status 3), still fine for
+  supply and withdraw. Fixed-pool USDC sits at ~81% utilization.
+- **Prices:** DEX, Soroswap and the classic AMM agreed within ~0.5% (4.98–5.0 XLM
+  per USDC); the DEX was slightly best for buying USDC.
+- **`tx send` can time out** with the tx never landing. Check `tx fetch result
+  --hash`, then rebuild (fresh simulate, longer deadline) rather than assume.
+- **Stroops:** `token balance` prints stroops. 1011561 is 0.1011561, not 1.01.
+- **Classic AMM from the CLI** needs two workarounds: the pool-share trustline
+  (`tx decode` → edit `line` → `tx encode`) and the `L…` pool id, which Horizon
+  gives only in hex. `lpid.py` (plain Python, below) converts it.
+
+```python
+# hex liquidity pool id -> L... strkey (version byte 11<<3, CRC16-XModem, base32)
+import base64, sys
+def crc16(b):
+    c = 0
+    for x in b:
+        c ^= x << 8
+        for _ in range(8): c = ((c << 1) ^ 0x1021) & 0xFFFF if c & 0x8000 else (c << 1) & 0xFFFF
+    return c
+raw = bytes([11 << 3]) + bytes.fromhex(sys.argv[1])
+print(base64.b32encode(raw + crc16(raw).to_bytes(2, "little")).decode())
+```
