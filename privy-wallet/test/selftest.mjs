@@ -35,6 +35,15 @@ const tx = new TransactionBuilder(new Account(kp.publicKey(), "1"), { fee: "100"
 const dry = run(["sign", "--network", "testnet"], tx);
 check(dry.status === 3 && dry.stdout === "" && dry.stderr.includes('"amount": "1.5000000"'), "sign without --yes shows the summary and signs nothing");
 
+const deposit = new TransactionBuilder(new Account(kp.publicKey(), "1"), { fee: "100", networkPassphrase: Networks.TESTNET })
+  .addOperation(Operation.liquidityPoolDeposit({ liquidityPoolId: "ab".repeat(32), maxAmountA: "0.5", maxAmountB: "0.1", minPrice: "4.7", maxPrice: "5.3" }))
+  .setTimeout(300)
+  .build()
+  .toXDR();
+const lp = run(["sign", "--network", "testnet"], deposit);
+check(lp.status === 3 && ['"maxAmountA": "0.5000000"', '"maxAmountB": "0.1000000"', '"minPrice": "4.7"', '"maxPrice": "5.3"'].every((s) => lp.stderr.includes(s)),
+  "a liquidity pool deposit's summary shows its amounts and price band");
+
 const signed = run(["sign", "--network", "testnet", "--yes"], tx);
 check(signed.status === 0, `sign --yes succeeds${signed.status ? ": " + signed.stderr.split("\n").slice(-2).join(" ") : ""}`);
 // Ed25519 is deterministic, so signing locally with the same key must give the same envelope.

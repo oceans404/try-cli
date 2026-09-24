@@ -103,7 +103,8 @@ async function create(opts) {
 function describeOp(op) {
   const out = { type: op.type };
   if (op.source) out.source = op.source;
-  for (const k of ["destination", "amount", "startingBalance", "limit", "sendMax", "sendAmount", "destAmount", "destMin", "selling", "buying", "price", "offerId"]) {
+  for (const k of ["destination", "amount", "startingBalance", "limit", "sendMax", "sendAmount", "destAmount", "destMin", "selling", "buying", "price", "offerId",
+    "liquidityPoolId", "maxAmountA", "maxAmountB", "minPrice", "maxPrice", "minAmountA", "minAmountB"]) {
     if (op[k] !== undefined) out[k] = String(op[k]);
   }
   for (const k of ["asset", "line", "sendAsset", "destAsset"]) {
