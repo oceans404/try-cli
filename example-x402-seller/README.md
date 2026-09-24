@@ -1,5 +1,8 @@
 # example-x402-seller
 
+**Live on testnet:** https://try-cli-jukj.onrender.com/fortune
+(listed on Rail402 as ["Stellar Fortunes"](https://explorer.rail402.dev/testnet/address/GBCKZHYGFWRS77UVZCOGTST55OL3HHXDSAYZRKPNBQGO5DXHSCBGRL7B))
+
 A minimal paid API on Stellar using [x402](https://www.x402.org/).
 `GET /fortune` returns a fortune-cookie fortune with six lucky numbers for
 $0.01 in USDC. Unpaid requests get HTTP 402 with the payment terms; a
@@ -169,40 +172,32 @@ record.
 
 ## Listing on Rail402
 
-With the Rail402 facilitator, the route's discovery metadata (`serviceName`,
-`tags`, `description`, and the `describeEndpoint` parameters in `server.js`)
-is cataloged
-automatically when a payment settles. There is no registration step. The
-listing is owned by the `payTo` that got paid, and it ranks higher with more
-distinct buyers; paying yourself adds no ranking. See Rail402's
-[Get discovered](https://docs.rail402.dev/sellers/get-discovered).
+A route is listed in Rail402's [Bazaar](https://explorer.rail402.dev/testnet/sellers?registered=true)
+automatically once a payment for it settles through Rail402's facilitator. No
+sign-up. The listing is owned by the `payTo` and only updates on a settled
+payment.
 
-Before the first payment:
+The route needs:
 
-1. **Deploy to a public URL.** The catalog records the URL the buyer paid, so
-   paying `http://localhost:3001` publishes a dead listing.
-2. **Check the challenge** as above: `https://` resource URL, your `payTo`.
-3. **Pay the plain route** (`/fortune`, no `?topic=`). The resource URL is
-   built from the full request URL, query string included.
-4. **Buy from a different account** than the recipient.
-5. **Set `serviceName` and `tags`** on the route. They're the highest-weighted
-   fields in Rail402's search, and every service on the explorer's registered
-   list has a `serviceName`. The catalog only picks up metadata changes when a
-   payment settles, so after changing them, redeploy and make one more paid
-   call to refresh the listing.
+- `FACILITATOR_URL=https://facilitator.rail402.dev` on `stellar:testnet`
+- `registerExtension(bazaarResourceServerExtension)` on the resource server
+- `serviceName` (the explorer won't show the route without it), `tags`,
+  `description`, `mimeType`, and `maxTimeoutSeconds`
+- `extensions: describeEndpoint({ params, outputExample })`
+- a public `https://` URL (behind a proxy, `app.set("trust proxy", true)`)
+- a funded `payTo` with a trustline for the payment asset
 
-```bash
-STELLAR_SECRET="$(stellar keys secret buyer)" npm run buy -- https://<your-service>.onrender.com/fortune
-```
+Then:
 
-Then confirm the listing:
+1. Deploy, and check the live 402 shows an `https://` URL, your
+   `serviceName`, and your `payTo`.
+2. Pay the plain route URL (no query string) from an account other than
+   `payTo`:
+   `STELLAR_SECRET="$(stellar keys secret buyer)" npm run buy -- https://<your-host>/<route>`
+3. Confirm: `curl -s "https://facilitator.rail402.dev/discovery/resources?payTo=<G_ADDRESS>"`
 
-```bash
-curl -s "https://facilitator.rail402.dev/discovery/resources?payTo=<YOUR_G_ADDRESS>"
-```
-
-It should also appear in the explorer's
-[registered sellers](https://explorer.rail402.dev/testnet/sellers?registered=true).
+After changing any metadata, redeploy and pay once more to update the listing.
+Details: Rail402's [Get discovered](https://docs.rail402.dev/sellers/get-discovered).
 
 ## Going to mainnet
 
