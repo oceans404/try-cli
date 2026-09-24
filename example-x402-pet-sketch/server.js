@@ -9,12 +9,18 @@ import { ExactStellarScheme } from "@x402/stellar/exact/server";
 import { bazaarResourceServerExtension } from "@x402/extensions/bazaar";
 import { describeEndpoint } from "@rail402.dev/sdk";
 import { photoToSvg } from "./sketch.js";
+import { mountDashboard } from "./dashboard.js";
 
 const NETWORK = process.env.STELLAR_NETWORK || "stellar:testnet";
 const FACILITATOR_URL = process.env.FACILITATOR_URL || "https://facilitator.rail402.dev";
 const PORT = Number(process.env.PORT || 3002);
 const PAYWALL = process.env.PAYWALL !== "off";
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+const PRICE_UNITS = "2500000"; // $0.25 at 7 decimals; keep in sync with price below
+const USDC_SAC = {
+  "stellar:testnet": "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+  "stellar:pubnet": "CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75",
+}[NETWORK];
 
 const isOZ = FACILITATOR_URL.includes("channels.openzeppelin.com");
 const required = ["OPENAI_API_KEY", ...(PAYWALL ? ["STELLAR_RECIPIENT"] : []), ...(PAYWALL && isOZ ? ["OZ_API_KEY"] : [])];
@@ -99,6 +105,11 @@ app.post("/sketch", express.json({ limit: "15mb" }), async (req, res) => {
     res.status(502).json({ error: "Could not draw this photo. You were not charged." });
   }
 });
+
+// Public sales dashboard (on-chain data, no secrets).
+if (process.env.STELLAR_RECIPIENT) {
+  mountDashboard(app, { payTo: process.env.STELLAR_RECIPIENT, priceUnits: PRICE_UNITS, asset: USDC_SAC, network: NETWORK });
+}
 
 app.get("/health", (_req, res) => res.json({ ok: true, paywall: PAYWALL, network: NETWORK }));
 

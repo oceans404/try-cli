@@ -26,6 +26,7 @@ isn't charged. The authorization is valid for 300 seconds to cover the wait.
 | `server.js` | Express + `@x402/express` gating `POST /sketch` at $0.25 |
 | `cli.js` | `npm run sketch -- <photo>`: run the pipeline without the server |
 | `buy.mjs` | A buyer: uploads a photo, pays over x402, saves the SVG |
+| `dashboard.js` | `/dashboard`: sketches sold, revenue, and each sale, refreshed every 5 seconds |
 
 ## Setup
 
@@ -74,6 +75,16 @@ Deploy and list it exactly like [example-x402-seller](../example-x402-seller/REA
 - `OPENAI_API_KEY` in the host's environment variables, never in the repo
 - `FACILITATOR_URL=https://facilitator.rail402.dev` and your `STELLAR_RECIPIENT`
 - the first paid call made against the public `https://` URL
+
+## Sales dashboard
+
+`/dashboard` shows sketches sold, total revenue, unique buyers, and each sale
+with its stellar.expert link, refreshing every 5 seconds. It reads settled
+payments to `STELLAR_RECIPIENT` from the Rail402 explorer's public API and
+counts those of exactly $0.25 in USDC. The explorer groups payments by
+recipient, not by route, so give this service its own `STELLAR_RECIPIENT` if
+the same address is paid for other things at the same price. The data is
+public onchain, so the page needs no login.
 
 ## Notes
 
