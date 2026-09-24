@@ -10,17 +10,21 @@ wallet for mainnet.
 | [`privy-wallet/`](privy-wallet) | The secure/mainnet wallet. Its key is held by Privy; spending is capped by a USDC allowance |
 | [`docs/`](docs) | Stellar DeFi directory, and testnet DeFi recipes for the CLI |
 | [`scripts/`](scripts) | `setup.sh` builds the CLI; `rpc-relay.py` lets it reach testnet/mainnet through the cloud proxy |
+| [`.env.claudecode`](.env.claudecode) | What the cloud environment needs (variables, setup script, hosts) |
 | [`CLAUDE.md`](CLAUDE.md) | Session setup and rules for agents |
 
 ## Cloud session setup
 
-Paste `scripts/setup.sh` into the environment's **Setup script**. It builds
-the Stellar CLI from GitHub `main` into `~/.stellar-main` (5 to 15 minutes
-cold). Call it by its full path: `~/.stellar-main/bin/stellar`.
+[`.env.claudecode`](.env.claudecode) lists everything a Claude Code cloud
+environment needs, ahead of time. Set it in the environment's settings, not in
+a file:
 
-Environment variables: `PRIVY_APP_SECRET` for `privy-wallet/` (optional).
+- **Setup script:** `scripts/setup.sh` (builds the Stellar CLI, 5 to 15 minutes cold)
+- **Environment variables:** `PRIVY_APP_SECRET` (optional, for `privy-wallet/`) and `NODE_USE_ENV_PROXY=1`
+- **Network access:** the hosts listed in the file
+- **Connector (optional):** Raven MCP
 
-Start each session with `/session-setup` in Claude Code. It runs
+Then start each session with `/session-setup`. It runs
 `scripts/session-start.sh` (relays, networks, deps) and reports what's ready
 and what's next.
 
