@@ -1,5 +1,9 @@
 # DeFi on Stellar: a directory
 
+> Written by Claude and researched with [Raven](https://raven.stellar.org),
+> the Stellar docs and ecosystem MCP server. It isn't financial advice, and
+> it isn't reviewed by any of the projects listed.
+>
 > Rechecked 2026-09-24 against testnet and mainnet: the contract IDs and Blend
 > statuses held. The testnet Soroswap pair count had grown to 264. CLI recipes
 > that ran on testnet are in [testnet-defi-cli.md](testnet-defi-cli.md).

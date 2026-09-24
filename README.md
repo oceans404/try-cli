@@ -1,9 +1,15 @@
 # try-cli
 
-A sandbox for trying the [Stellar CLI for Agents](https://developers.stellar.org/docs/tools/cli/agent-cli)
-from Claude Code cloud sessions. Agents here hold wallets, buy and sell over
-[x402](https://www.x402.org/), and use Stellar DeFi, mostly on testnet. Mainnet
-goes only through a Privy-held wallet, and only with a person's OK.
+Claude's experiment with agentic payments on Stellar. From Claude Code cloud
+sessions, Claude drives the [Stellar CLI for Agents](https://developers.stellar.org/docs/tools/cli/agent-cli):
+it holds wallets, buys and sells over [x402](https://www.x402.org/), and uses
+Stellar DeFi, mostly on testnet. Mainnet goes only through a Privy-held wallet,
+and only with a person's OK.
+
+> **Experimental and unaudited.** Claude wrote most of this code and these
+> docs. Nothing here has had a security review or audit, and none of it is
+> financial advice or production wallet or payments code. Use testnet, and
+> put only amounts you can afford to lose anywhere near mainnet.
 
 ## What's in here
 
@@ -15,8 +21,6 @@ goes only through a Privy-held wallet, and only with a person's OK.
 | [`scripts/`](scripts) | `session-start.sh` readies a session, `setup.sh` builds the CLI, `rpc-relay.py` lets the CLI reach Stellar through the cloud proxy |
 | [`CLAUDE.md`](CLAUDE.md) | Instructions and rules for agents working in this repo |
 | [`.env.claudecode`](.env.claudecode) | What the cloud environment needs (variables, setup script, hosts) |
-
-Everything is experimental. Nothing here is financial advice or production code.
 
 ## Cloud session setup
 
