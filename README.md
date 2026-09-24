@@ -20,6 +20,10 @@ cold). Call it by its full path: `~/.stellar-main/bin/stellar`.
 
 Environment variables: `PRIVY_APP_SECRET` for `privy-wallet/` (optional).
 
+Start each session with `/session-setup` in Claude Code. It runs
+`scripts/session-start.sh` (relays, networks, deps) and reports what's ready
+and what's next.
+
 ## Agent resources
 
 - Raven MCP: `https://raven.stellar.org/mcp` (add as a connector, then authenticate)

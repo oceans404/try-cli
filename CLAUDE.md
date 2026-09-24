@@ -5,14 +5,15 @@ x402 payments, and a Privy-held mainnet wallet.
 
 ## Start here (every cloud session)
 
+Run `/session-setup` (the command is in `.claude/commands/`), or do it by hand:
+
 ```bash
-S=~/.stellar-main/bin/stellar          # built by scripts/setup.sh; not on PATH (re-set S in each shell)
-$S skill                               # read it before the first stellar command
-python3 scripts/rpc-relay.py 8001 &    # testnet relay ("Address already in use" = already running)
-$S network add testnet-relay --rpc-url http://127.0.0.1:8001/ \
-  --network-passphrase "Test SDF Network ; September 2015"
-$S network health --network testnet-relay
+scripts/session-start.sh [--mainnet]   # relays, CLI networks, npm deps; safe to re-run
+~/.stellar-main/bin/stellar skill      # read it before the first stellar command
 ```
+
+The CLI lives at `~/.stellar-main/bin/stellar` (built by `scripts/setup.sh`)
+and isn't on PATH.
 
 Why the relay: the CLI's RPC client ignores `HTTPS_PROXY`, so `--network testnet`
 gets `403`. The relay forwards through the proxy and also serves friendbot
@@ -41,6 +42,7 @@ addresses, hashes, and stellar.expert links. Identities and networks live in
 | Path | What |
 | --- | --- |
 | `scripts/setup.sh` | Builds the CLI from `main` into `~/.stellar-main` (environment setup script) |
+| `scripts/session-start.sh` | Per-session setup, run by `/session-setup` |
 | `scripts/rpc-relay.py` | `rpc-relay.py [port] [rpc-url]`, testnet by default |
 | `example-x402-seller/` | Live x402 seller ([/fortune](https://try-cli-jukj.onrender.com/fortune), 0.01 USDC) and `buy.mjs` |
 | `docs/` | DeFi directory (10 services, contract IDs) and tested testnet DeFi CLI recipes (Soroswap, Blend, DeFindex, classic DEX/AMM, CETES, gotchas) |
