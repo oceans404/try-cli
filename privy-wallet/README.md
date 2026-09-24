@@ -69,10 +69,12 @@ The wallet exists: `GDCSXONEADAR56IFW6SU3LPG4ILIR5CDVQ2ALTB3JCAGFMLVFWIJEBOM`
 controls it). It holds 10,000 testnet XLM from friendbot. Don't run `create`
 again.
 
-Each step needs a session with `PRIVY_APP_SECRET` and the user's OK to use it
-(check it without printing: `[ -n "$PRIVY_APP_SECRET" ] && echo set`):
+The testnet flow and a first round of small mainnet DeFi (DEX, Soroswap swap and
+LP, Blend supply, classic AMM, order book) ran on 2026-09-24 with the real Privy.
+Every transaction and what was learned is in [LOG.md](LOG.md).
 
-1. Finish the testnet flow: `stellar keys add privy-wallet`, add the trustline,
-   grant an allowance from a new testnet main wallet holding USDC, pull (and
-   check that an over-cap pull is rejected), then `buy`.
-2. Then discuss mainnet with the user. They sign the real allowance themselves.
+Next, with `PRIVY_APP_SECRET` and the user's OK:
+
+1. Before holding real value, consider a Privy owner or authorization key on the
+   wallet: today the app secret alone controls it.
+2. Discuss the mainnet allowance setup with the user. They sign it themselves.
