@@ -104,6 +104,7 @@ python3 scripts/rpc-relay.py 8002 https://mainnet.sorobanrpc.com/ &
 The environment sets `PRIVY_APP_SECRET` for a Privy-held Stellar wallet (the
 secure/mainnet wallet; the key never leaves Privy). Its App ID is
 `cmrpejbk700es0ckwpdu1hxcj`. Testnet work uses plain CLI identities instead.
+The tooling and usage are in `privy-wallet/README.md`.
 
 - Don't use `PRIVY_APP_SECRET` unless the user asks for the Privy wallet in
   the current conversation. Approval covers that task only, not later ones.

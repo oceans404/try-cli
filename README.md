@@ -15,6 +15,11 @@ Call the main build by its full path:
 ~/.stellar-main/bin/stellar skill
 ```
 
+## Projects
+
+- [`example-x402-seller/`](example-x402-seller): a paid x402 API on Stellar testnet
+- [`privy-wallet/`](privy-wallet): the secure/mainnet wallet, with its key held by Privy
+
 ## Agent resources
 
 - Raven MCP server: `https://raven.stellar.org/mcp`
