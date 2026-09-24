@@ -61,6 +61,10 @@ app.use(
           payTo: process.env.STELLAR_RECIPIENT,
           maxTimeoutSeconds: 60,
         },
+        // serviceName and tags are the highest-weighted fields in Rail402's search,
+        // and the explorer's registered-sellers list shows named services.
+        serviceName: "Stellar Fortunes",
+        tags: ["fortune", "stellar", "x402", "cli", "tips"],
         description: "A one-line fortune with a practical tip about building on Stellar, x402, or the Stellar CLI.",
         mimeType: "application/json",
         extensions: describeEndpoint({

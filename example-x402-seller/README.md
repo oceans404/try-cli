@@ -167,8 +167,9 @@ record.
 
 ## Listing on Rail402
 
-With the Rail402 facilitator, the route's discovery metadata (the description
-and the `describeEndpoint` parameters in `server.js`) is cataloged
+With the Rail402 facilitator, the route's discovery metadata (`serviceName`,
+`tags`, `description`, and the `describeEndpoint` parameters in `server.js`)
+is cataloged
 automatically when a payment settles. There is no registration step. The
 listing is owned by the `payTo` that got paid, and it ranks higher with more
 distinct buyers; paying yourself adds no ranking. See Rail402's
@@ -182,6 +183,11 @@ Before the first payment:
 3. **Pay the plain route** (`/fortune`, no `?topic=`). The resource URL is
    built from the full request URL, query string included.
 4. **Buy from a different account** than the recipient.
+5. **Set `serviceName` and `tags`** on the route. They're the highest-weighted
+   fields in Rail402's search, and every service on the explorer's registered
+   list has a `serviceName`. The catalog only picks up metadata changes when a
+   payment settles, so after changing them, redeploy and make one more paid
+   call to refresh the listing.
 
 ```bash
 STELLAR_SECRET="$(stellar keys secret buyer)" npm run buy -- https://<your-service>.onrender.com/fortune
