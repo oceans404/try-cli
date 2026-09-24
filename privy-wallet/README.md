@@ -18,7 +18,7 @@ pick it up.
 
 ```bash
 cd privy-wallet && npm install
-node privy.mjs create --app-id cmrpejbk700es0ckwpdu1hxcj   # once; commit wallet.json
+NODE_USE_ENV_PROXY=1 node privy.mjs create --app-id cmrpejbk700es0ckwpdu1hxcj   # done (wallet.json)
 stellar keys add privy-wallet --public-key "$(node privy.mjs address)"
 ```
 
@@ -64,11 +64,15 @@ Privy with a local key. The same mock ran the full flow on testnet
 
 ## Next steps
 
-Needs a session with `PRIVY_APP_SECRET` and the user's OK to use it:
+The wallet exists: `GDCSXONEADAR56IFW6SU3LPG4ILIR5CDVQ2ALTB3JCAGFMLVFWIJEBOM`
+(Privy id `nba78jsed38y19957h3j0e63`, no owner, so the app secret alone
+controls it). It holds 10,000 testnet XLM from friendbot. Don't run `create`
+again.
 
-1. Start the testnet relay (`../CLAUDE.md`), `npm install`, and check the
-   secret without printing it: `[ -n "$PRIVY_APP_SECRET" ] && echo set`.
-2. `create` the wallet and commit `wallet.json`.
-3. Repeat the testnet flow with it: friendbot-fund it, add the trustline, grant
-   an allowance from a new testnet main wallet holding USDC, pull, then `buy`.
-4. Then discuss mainnet with the user. They sign the real allowance themselves.
+Each step needs a session with `PRIVY_APP_SECRET` and the user's OK to use it
+(check it without printing: `[ -n "$PRIVY_APP_SECRET" ] && echo set`):
+
+1. Finish the testnet flow: `stellar keys add privy-wallet`, add the trustline,
+   grant an allowance from a new testnet main wallet holding USDC, pull (and
+   check that an over-cap pull is rejected), then `buy`.
+2. Then discuss mainnet with the user. They sign the real allowance themselves.
