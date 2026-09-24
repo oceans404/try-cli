@@ -2,16 +2,19 @@
   "name": "example-x402-seller",
   "version": "1.0.0",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node server.js"
+    "start": "node server.js",
+    "buy": "node buy.mjs"
   },
   "type": "module",
-  "private": "true",
+  "private": true,
   "dependencies": {
+    "@rail402.dev/sdk": "0.1.2",
     "@stellar/stellar-sdk": "^17.1.0",
-    "@x402/core": "^2.27.0",
-    "@x402/express": "^2.27.0",
-    "@x402/stellar": "^2.27.0",
+    "@x402/core": "2.27.0",
+    "@x402/express": "2.27.0",
+    "@x402/extensions": "2.27.0",
+    "@x402/fetch": "2.27.0",
+    "@x402/stellar": "2.27.0",
     "dotenv": "^18.0.3",
     "express": "^5.2.1"
   }
