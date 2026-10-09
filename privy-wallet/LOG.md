@@ -106,3 +106,22 @@ def crc16(b):
 raw = bytes([11 << 3]) + bytes.fromhex(sys.argv[1])
 print(base64.b32encode(raw + crc16(raw).to_bytes(2, "little")).decode())
 ```
+
+## 2026-09-28
+
+| Time (UTC) | Network | What | Result |
+| --- | --- | --- | --- |
+| 18:40 | mainnet | USDT0 trustline (`change-trust --line USDT0:GATISXX6…JHN6Q`, max limit), approved by the user, so the wallet can receive USDT0 as `payTo` for `example-x402-hello`. Issuer and SAC `CBSJZEIO…R26YF` checked on-chain first (`contract id asset`, `token symbol`/`decimals`) | Trustline live, 0.5 XLM reserve, fee 100 stroops. [ea0fc717…](https://stellar.expert/explorer/public/tx/ea0fc717806f5f25698f3ad41e3f5a0a1b7f2f081b1de8fb4233e93fab36da60) |
+| 18:42 | — | `PRIVY_WALLET_FILE=buyer-wallet.json node privy.mjs create` (user asked for an example mainnet buyer) | Buyer wallet `ixjyjfna6g77jrz4hu9zzety`, `GAMU5TZPPTDZSZDFVNLS6OUXG6HGPZ3URTB4FLFXE2OI3MOYKLYCHSQU`, no owner. CLI identity `privy-buyer` (public key only) |
+| 18:43 | mainnet | Main wallet: create the buyer account with 2.1 XLM | [9613b9ca…](https://stellar.expert/explorer/public/tx/9613b9caa480210fe63074371d7ae477d9c2e98c844a5ecdb9ec2591f90213b8) |
+| 18:43 | mainnet | Buyer: USDC and USDT0 trustlines | [63626917…](https://stellar.expert/explorer/public/tx/63626917ed74e11ff9dc3b84584f0b4e1dbd57b672c038cde87a89acb0e05215), [6db875f7…](https://stellar.expert/explorer/public/tx/6db875f77d91f1580d808311436b0e444248d6e939699e89f0e210f6343dc3d8) |
+| 18:44 | mainnet | Main wallet: 0.02 USDC to the buyer | [2b57f626…](https://stellar.expert/explorer/public/tx/2b57f62640aedf26f90329c9c3fe71aa3ddab26261dad721db0f1c1a43cef3a6) |
+| 18:44 | mainnet | Main wallet: path payment, XLM → exactly 0.02 USDT0 to the buyer (max 0.1 XLM) | Spent 0.086957 XLM. [ee03b298…](https://stellar.expert/explorer/public/tx/ee03b298f4d6acbd3edcee135de68e80eb1c42c2b1affc6523911174605eaf9c) |
+| 18:50 | mainnet | Buyer: x402 buy of `example-x402-hello` (local, OZ mainnet facilitator) with USDT0, 0.001 | **Rejected** by the facilitator: `unsupported_asset`. Nothing signed or charged. Also needed `spendControls.allowedAssets` in the client: x402 only pays the default asset (USDC) otherwise |
+| 18:51 | mainnet | Buyer: same buy with USDC, 0.001 | `hello world mainnet`; buyer −0.001 USDC, seller +0.001, fee paid by OZ. [b75e3bda…](https://stellar.expert/explorer/public/tx/b75e3bdaabc9eba9f8ea94afe30cdc098f302728bb291515f5d32034f1b9ff1e) |
+
+## 2026-09-29
+
+| Time (UTC) | Network | What | Result |
+| --- | --- | --- | --- |
+| 18:44 | mainnet | After OZ added USDT0 to the Built on Stellar mainnet allowlist: buyer's x402 buy of `example-x402-hello` with USDT0, 0.001 | `hello world mainnet`; buyer −0.001 USDT0, seller +0.001 USDT0, fee paid by OZ. [0b4036ac…](https://stellar.expert/explorer/public/tx/0b4036ac85456a841d1909c20afb53bd1204fec5a898018246314cd2218a6b66) |

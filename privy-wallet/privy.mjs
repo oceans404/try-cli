@@ -5,7 +5,7 @@
 //   node privy.mjs create                       make the wallet once, save wallet.json
 //   node privy.mjs address                      print its G... address
 //   <unsigned XDR> | node privy.mjs sign --network testnet [--yes]
-//   node privy.mjs buy <url> --network testnet [--max 0.10] [--yes]
+//   node privy.mjs buy <url> --network testnet [--max 0.10] [--asset <C... contract>] [--yes]
 //
 // Needs PRIVY_APP_SECRET in the environment (never printed). The App ID and wallet
 // id are not secret; they live in wallet.json.
@@ -178,7 +178,7 @@ async function buy(opts) {
   const wallet = loadWallet();
   const net = network(opts);
   const url = opts._[1];
-  if (!url) fail("usage: node privy.mjs buy <url> --network testnet [--max 0.10] [--yes]");
+  if (!url) fail("usage: node privy.mjs buy <url> --network testnet [--max 0.10] [--asset <C... contract>] [--yes]");
   const maxStroops = BigInt(Math.round(Number(opts.max ?? "0.10") * 1e7));
 
   // Look at the price first, without paying.
@@ -186,8 +186,9 @@ async function buy(opts) {
   const header = probe.headers.get("payment-required");
   if (probe.status !== 402 || !header) fail(`expected HTTP 402 with a payment-required header, got ${probe.status}`);
   const terms = JSON.parse(Buffer.from(header, "base64").toString("utf8"));
-  const offers = (terms.accepts ?? []).filter((a) => a.network === net.caip2);
-  if (offers.length === 0) fail(`the seller doesn't accept ${net.caip2}`);
+  // --asset keeps only the seller's offers in that token contract (e.g. USDC or USDT0).
+  const offers = (terms.accepts ?? []).filter((a) => a.network === net.caip2 && (!opts.asset || a.asset === opts.asset));
+  if (offers.length === 0) fail(`the seller doesn't accept ${net.caip2}${opts.asset ? ` in ${opts.asset}` : ""}`);
   console.error(JSON.stringify({ url, network: net.caip2, payer: wallet.address, offers: offers.map((a) => ({ scheme: a.scheme, amountUsdc: Number(a.amount) / 1e7, asset: a.asset, payTo: a.payTo })) }, null, 2));
   const tooPricey = offers.filter((a) => BigInt(a.amount) > maxStroops);
   if (tooPricey.length) fail(`price is above --max ${Number(maxStroops) / 1e7}`);
@@ -197,9 +198,21 @@ async function buy(opts) {
   const { ExactStellarScheme } = await import("@x402/stellar/exact/client");
   const payFetch = wrapFetchWithPaymentFromConfig(fetch, {
     schemes: [{ network: net.caip2, client: new ExactStellarScheme(privySigner(wallet), { url: net.rpc }) }],
+    policies: opts.asset ? [(_v, reqs) => reqs.filter((r) => r.asset === opts.asset)] : [],
+    // The client only pays each network's default asset (USDC) unless others are
+    // allow-listed; allow exactly the requested token, capped at --max.
+    ...(opts.asset && {
+      spendControls: { allowedAssets: [{ network: net.caip2, asset: opts.asset, maxAmountPerPayment: maxStroops.toString() }] },
+    }),
   });
   const res = await payFetch(url);
   console.error(`status: ${res.status}`);
+  if (res.status === 402) {
+    // A rejected payment comes back as a fresh 402; its terms carry the reason.
+    const again = res.headers.get("payment-required");
+    const why = again && JSON.parse(Buffer.from(again, "base64").toString("utf8")).error;
+    if (why) console.error(`payment rejected: ${why}`);
+  }
   const receipt = res.headers.get("payment-response");
   if (receipt) console.error("payment-response:", JSON.stringify(decodePaymentResponseHeader(receipt)));
   console.log(await res.text());
