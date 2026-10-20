@@ -13,6 +13,7 @@ and the plan for the rest are in [`version-a/`](version-a/).
 
 | Read | For |
 | --- | --- |
+| [The slides](https://claude.ai/artifact/6HJq4iDijBRNoxR5Cwqqp2) | 12 slides: what we built, what it showed, CAP-72a, next steps (private until shared) |
 | This page | Running it, what you'll see, what we found |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | How every piece connects, versions A and B, the local CAP-72 network |
 | [version-a/CAP72-OBJECTIONS-AND-IMPROVEMENTS.md](version-a/CAP72-OBJECTIONS-AND-IMPROVEMENTS.md) | Why CAP-72 stalled, what we'd change (CAP-72a), a pitch for the thread |
