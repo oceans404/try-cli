@@ -8,6 +8,16 @@ import { PASSPHRASE, SELLERS, env, usdc, short, txLink } from "./config.mjs";
 import { createPolicySigner } from "./signer.mjs";
 import { PolicyExactScheme } from "./payment.mjs";
 
+// Retry once if a pooled keep-alive connection was closed by the seller meanwhile.
+async function get(url, init) {
+  try {
+    return await fetch(url, init);
+  } catch (e) {
+    if (e.cause?.code !== "UND_ERR_SOCKET") throw e;
+    return fetch(url, init);
+  }
+}
+
 /**
  * One purchase. Returns { stage, status, terms, payment, settle, body, refusal }:
  * stage is "paid", "agent" (refused locally) or "seller" (seller answered 402
@@ -16,9 +26,13 @@ import { PolicyExactScheme } from "./payment.mjs";
 export async function buy(url, { localCheck = true, agent = env.agent } = {}) {
   const signer = createPolicySigner(agent, env.policy, PASSPHRASE);
   const scheme = new PolicyExactScheme(signer, { localCheck });
-  const http = new x402HTTPClient(new x402Client().register("stellar:*", scheme));
+  const client = new x402Client().register("stellar:*", scheme);
+  // x402's client has its own spend controls (by default, at most $1 per payment).
+  // They live in the agent's software, so a misbehaving agent can turn them off.
+  if (!localCheck) client.setSpendControls(false);
+  const http = new x402HTTPClient(client);
 
-  const first = await fetch(url);
+  const first = await get(url);
   if (first.status !== 402) return { stage: "free", status: first.status, body: await first.text() };
   const paymentRequired = http.getPaymentRequiredResponse((n) => first.headers.get(n), await first.json().catch(() => undefined));
   const terms = paymentRequired.accepts[0];
@@ -28,10 +42,11 @@ export async function buy(url, { localCheck = true, agent = env.agent } = {}) {
     payload = await http.createPaymentPayload(paymentRequired);
   } catch (e) {
     if (scheme.last && !scheme.last.payment.ok) return { stage: "agent", status: 402, terms, payment: scheme.last.payment };
+    if (/spendControls/.test(e.message)) return { stage: "agent", status: 402, terms, reason: e.message.split(". ")[0] };
     throw e;
   }
 
-  const res = await fetch(url, { headers: http.encodePaymentSignatureHeader(payload) });
+  const res = await get(url, { headers: http.encodePaymentSignatureHeader(payload) });
   const payment = scheme.last?.payment;
   const text = await res.text();
   let body;
@@ -51,6 +66,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   if (r.terms) console.log(`402 terms      ${usdc(r.terms.amount)} to ${short(r.terms.payTo)}`);
   console.log(`payer          ${env.policy} (agent_policy wallet)`);
   console.log(`status         ${r.status} (${r.stage})`);
+  if (r.reason) console.log(`refused by      ${r.reason}`);
   if (r.payment?.policyError) console.log(`policy         ${r.payment.policyError}`);
   if (r.refusal) console.log(`refusal        ${r.refusal}`);
   if (r.settle?.transaction) console.log(`tx             ${txLink(r.settle.transaction)}`);

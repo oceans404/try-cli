@@ -97,7 +97,7 @@
                   }
                 ]
               },
-              "durability": "persistent",
+              "durability": "temporary",
               "val": {
                 "i128": "10000000"
               }
@@ -105,7 +105,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 518400
+        "live_until": 34560
       },
       {
         "entry": {
@@ -149,7 +149,7 @@
                               "symbol": "agent_pubkey"
                             },
                             "val": {
-                              "bytes": "5a8e4be5d8c8bc2e45c7fb0bfa5633cb27cc9ccf577bb8d03d9e2dfb653f7df5"
+                              "bytes": "7704be09ca2ced4112e42fa2fc497a4781c60d97fd7ea8378caae9d7fe6897bb"
                             }
                           },
                           {

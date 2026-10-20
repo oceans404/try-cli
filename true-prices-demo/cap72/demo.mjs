@@ -10,7 +10,7 @@ import { spawn, execFileSync } from "node:child_process";
 import { mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
-import { Keypair, StrKey } from "@stellar/stellar-sdk";
+import { Asset, Keypair, Operation, StrKey } from "@stellar/stellar-sdk";
 import { HERE, FACILITATOR_URL, SELLERS, env, usd, usdc, short, txLink, need } from "./config.mjs";
 import { balanceOf, rules as readRules, spentToday, policyOwner, rulesToCliJson } from "./chain.mjs";
 import { buy } from "./buy-agent.mjs";
@@ -30,7 +30,7 @@ const B = (s) => `\x1b[1m${s}\x1b[0m`;
 const red = (s) => `\x1b[31m${s}\x1b[0m`;
 const green = (s) => `\x1b[32m${s}\x1b[0m`;
 const dim = (s) => `\x1b[2m${s}\x1b[0m`;
-const row = (label, value, width = 15) => console.log(`  ${label.padEnd(width)}${value}`);
+const row = (label, value, width = 17) => console.log(`  ${label.padEnd(width)}${value}`);
 const rl = createInterface({ input: process.stdin, output: process.stdout });
 async function pause() {
   if (YES) return console.log();
@@ -107,18 +107,19 @@ async function step1() {
   if (before > 0n) console.log(dim(`  (the wallet already holds ${usdc(before)}; run ./setup-b.sh --redeploy for a clean run)`));
   row("agent wallet", `${short(env.policy)}  (agent_policy, a smart account C-address)`);
 
-  const classic = cli(
-    ["tx", "new", "payment", "--source", "cap72-funder", "--network", CLI_NETWORK, "--destination", env.policy,
-      "--asset", `USDC:${need("USDC_ISSUER")}`, "--amount", "100000000"],
-    { allowFail: true },
-  );
-  const why = classic.failed ? classic.stderr.split("\n").find((l) => /error/i.test(l)) || classic.stderr.split("\n")[0] : "it went through?";
+  // What an exchange sends: a classic Payment op. Its destination is a
+  // MuxedAccount (G or M address), so a C-address can't even be encoded.
+  let why = "it went through?";
+  try {
+    Operation.payment({ destination: env.policy, asset: new Asset("USDC", need("USDC_ISSUER")), amount: "10" });
+  } catch (e) {
+    why = `can't build it: ${e.message} (PaymentOp.destination is a MuxedAccount, G or M only)`;
+  }
   row("classic Payment", `${red("FAILED")}  ${why}`);
-  console.log(dim("  A classic Payment can't send to a C-address. This is the step CAP-72 turns into a plain payment."));
+  console.log(dim("  This is the step CAP-72 turns into a plain payment."));
 
-  const out = cli(["contract", "invoke", "--id", env.usdc, "--source", "cap72-funder", "--network", CLI_NETWORK, "--",
+  cli(["contract", "invoke", "--id", env.usdc, "--source", "cap72-funder", "--network", CLI_NETWORK, "--",
     "transfer", "--from", env.funder.publicKey(), "--to", env.policy, "--amount", "100000000"]);
-  void out;
   const after = await balanceOf(env.policy);
   row("sent", "10.00 USDC via the USDC contract's transfer (not a classic payment)");
   row("balance", usdc(after));
@@ -146,7 +147,7 @@ async function step3() {
   row("402 terms", `${usdc(res.terms.amount)} to ${short(res.terms.payTo)}`);
   row("policy check", `seller allowed, ${usd(res.terms.amount)} <= ${usd(r.max_per_payment)}, today ${usd(spent + BigInt(res.terms.amount))} of ${usd(r.daily_cap)}`);
   if (res.stage === "paid") {
-    row("result", `${green("200 OK")}  Best price for ${res.body.item}: $${res.body.best} at ${res.body.store}`);
+    row("result", `${green("200 OK")}  Best price for ${res.body.item}: $${res.body.best.toFixed(2)} at ${res.body.store}`);
     row("tx", `${txLink(res.settle.transaction)}  SUCCESS  ${usdc(res.terms.amount)} agent -> seller`);
   } else {
     row("result", red(`${res.status} ${res.payment?.policyError || res.refusal || ""}`));
@@ -158,13 +159,19 @@ async function step3() {
 
 async function attempt(label, url, { localCheck = false } = {}) {
   const since = new Date().toISOString();
-  const r = await buy(url, { localCheck });
+  let r;
+  try {
+    r = await buy(url, { localCheck });
+  } catch (e) {
+    console.log(`  ${label.padEnd(25)}${red("NOT SENT")}                 ${e.message}`);
+    return { error: e };
+  }
   const spent = await spentToday();
   const cap = (await readRules()).daily_cap;
   if (r.stage === "paid") {
     console.log(`  ${label.padEnd(25)}${green("200 OK")}                   today ${usd(spent)} of ${usd(cap)}   ${dim(txLink(r.settle.transaction))}`);
   } else if (r.stage === "agent") {
-    console.log(`  ${label.padEnd(25)}${red("REFUSED by the agent")}     policy: ${r.payment.policyError}`);
+    console.log(`  ${label.padEnd(25)}${red("REFUSED by the agent")}     ${r.payment ? `policy: ${r.payment.policyError}` : r.reason}`);
   } else {
     const reason = (await facilitatorReason(since)) || r.refusal;
     console.log(`  ${label.padEnd(25)}${red("REFUSED by facilitator")}   policy: ${r.payment?.policyError || "?"}   ${dim(reason || "")}`);
@@ -196,6 +203,15 @@ async function step4({ directSubmit = true } = {}) {
 }
 
 // ---------- live edits ----------
+// Live edits rerun step 4, which spends real (testnet) USDC, so keep the wallet stocked.
+async function topUp() {
+  const bal = await balanceOf(env.policy);
+  if (bal >= 50_000_000n) return;
+  cli(["contract", "invoke", "--id", env.usdc, "--source", "cap72-funder", "--network", CLI_NETWORK, "--",
+    "transfer", "--from", env.funder.publicKey(), "--to", env.policy, "--amount", "100000000"]);
+  console.log(dim(`  (funder topped the wallet up: ${usdc(bal)} -> ${usdc(await balanceOf(env.policy))})\n`));
+}
+
 async function edits() {
   let r = await readRules();
   let edited = false;
@@ -213,6 +229,7 @@ async function edits() {
     edited = true;
   }
   if (flag("--agent-key")) {
+    await topUp();
     const old = env.agent;
     const fresh = Keypair.random();
     r.agent_pubkey = fresh.rawPublicKey();
@@ -224,9 +241,15 @@ async function edits() {
     row("new key", `${short(fresh.publicKey())}  (saved to .env)`);
     const res = await buy(`${SELLERS.allowed}?item=airpods-pro-3`, { localCheck: false, agent: old });
     row("old key pays", res.stage === "paid" ? red("200 OK (unexpected)") : `${red("REFUSED")}  policy: ${res.payment?.policyError}`);
+    // The new key passes the signature check; the other rules still apply.
+    const next = await buy(`${SELLERS.allowed}?item=dyson-v15`, { localCheck: false, agent: fresh });
+    row("new key pays", next.stage === "paid"
+      ? `${green("200 OK")}  ${dim(txLink(next.settle.transaction))}`
+      : `${red("REFUSED")}  policy: ${next.payment?.policyError} (the signature passed; another rule said no)`);
     return { done: true };
   }
   if (!edited) return { done: false };
+  await topUp();
   updateRules(r);
   r = await readRules();
   console.log(B("LIVE EDIT  Owner updates the rules (update_rules, owner auth)"));
@@ -251,6 +274,7 @@ try {
   }
 } catch (e) {
   console.error(red(e.stack || String(e)));
+  if (e.cause) console.error(red(`cause: ${e.cause.stack || e.cause}`));
   process.exitCode = 1;
 } finally {
   stopServices();

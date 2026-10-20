@@ -13,7 +13,7 @@ import {
   nativeToScVal,
   rpc,
 } from "@stellar/stellar-sdk";
-import { getEstimatedLedgerCloseTimeSeconds } from "@x402/stellar";
+import { getEstimatedLedgerCloseTimeSeconds, findDefaultAsset } from "@x402/stellar";
 import { PASSPHRASE, server, policyError } from "./config.mjs";
 
 // Simulation needs a source account; the facilitator replaces it with its own.
@@ -50,7 +50,9 @@ export async function buildPayment({ signer, asset, payTo, amount, validUntilLed
   const unsigned = transferTx(src, asset, signer.address, payTo, amount);
   const recording = await server.simulateTransaction(unsigned);
   if (!rpc.Api.isSimulationSuccess(recording)) {
-    throw new Error(`recording simulation failed: ${recording.error}`);
+    // Fails before any auth check, e.g. the wallet can't cover the amount.
+    const why = /balance is not sufficient/.test(recording.error) ? "the wallet's balance is too low" : recording.error.split("\n")[0];
+    throw new Error(`can't build the payment: ${why}`);
   }
   const auth = await Promise.all(
     recording.result.auth.map((e) => (signer.owns(e) ? signer.authorize(e, validUntilLedger) : e)),
@@ -92,6 +94,8 @@ export class PolicyExactScheme {
     this.signer = signer;
     this.localCheck = localCheck;
     this.last = undefined;
+    // x402Client's spend controls only allow assets the scheme recognizes (USDC).
+    this.findDefaultAsset = findDefaultAsset;
   }
 
   async createPaymentPayload(x402Version, requirements) {

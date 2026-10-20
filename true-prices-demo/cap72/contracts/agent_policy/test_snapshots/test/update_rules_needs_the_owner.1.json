@@ -44,7 +44,7 @@
                         "symbol": "agent_pubkey"
                       },
                       "val": {
-                        "bytes": "f9bdb3972cb5050d51490817d99a3ed040a9beb090135bf81d6ebcdd3b605f65"
+                        "bytes": "9aee0d2fbf9c14d7c8c87c62bb59518633e74fc0a1a2d470aa446b7ae91176ff"
                       }
                     },
                     {
@@ -208,7 +208,7 @@
                               "symbol": "agent_pubkey"
                             },
                             "val": {
-                              "bytes": "f9bdb3972cb5050d51490817d99a3ed040a9beb090135bf81d6ebcdd3b605f65"
+                              "bytes": "9aee0d2fbf9c14d7c8c87c62bb59518633e74fc0a1a2d470aa446b7ae91176ff"
                             }
                           },
                           {

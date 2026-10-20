@@ -99,7 +99,7 @@
                   }
                 ]
               },
-              "durability": "persistent",
+              "durability": "temporary",
               "val": {
                 "i128": "20000000"
               }
@@ -107,7 +107,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 518400
+        "live_until": 34560
       },
       {
         "entry": {
@@ -126,7 +126,7 @@
                   }
                 ]
               },
-              "durability": "persistent",
+              "durability": "temporary",
               "val": {
                 "i128": "10000000"
               }
@@ -134,7 +134,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 518400
+        "live_until": 34560
       },
       {
         "entry": {
@@ -178,7 +178,7 @@
                               "symbol": "agent_pubkey"
                             },
                             "val": {
-                              "bytes": "9ac19e220a80518fc64bc2d4566ea53b2c4c38a7e9c6acf8176988e50f125970"
+                              "bytes": "91feb9dc74fd7d66bf5bb7bcc880f1bfe9f9bc1575e5b475bc3f06a7aaa3858e"
                             }
                           },
                           {

@@ -1,8 +1,12 @@
-// The demo's own x402 facilitator: @x402/stellar's ExactStellarScheme in a small
-// Express app. The public facilitators would refuse these payments (fee ceiling,
-// and for version A the delegated credential type; see the spec). This one only
-// raises the fee ceiling. It also keeps a log of verify results at GET /log so
-// the demo runner can print the exact refusal reasons.
+// The demo's own x402 facilitator: @x402/stellar's ExactStellarScheme, unmodified,
+// in a small Express app. It runs locally so the demo doesn't depend on a shared
+// facilitator's uptime and latency, and so version A can patch in the delegated
+// credential type later. It keeps a log of verify results at GET /log so the
+// demo runner can print the exact refusal reasons.
+//
+// Fee ceiling: the stock default (50,000 stroops). agent_policy keeps its day
+// bucket in temporary storage, so a payment costs about 13k to 26k stroops and
+// fits. Set MAX_FEE_STROOPS to raise it for heavier policies.
 import express from "express";
 import { x402Facilitator } from "@x402/core/facilitator";
 import { createEd25519Signer } from "@x402/stellar";
@@ -14,7 +18,10 @@ const signer = createEd25519Signer(need("FACILITATOR_SECRET"), NETWORK);
 
 const facilitator = new x402Facilitator().register(
   NETWORK,
-  new ExactStellarScheme([signer], { rpcConfig: { url: RPC_URL }, maxTransactionFeeStroops: 2_000_000 }),
+  new ExactStellarScheme([signer], {
+    rpcConfig: { url: RPC_URL },
+    ...(process.env.MAX_FEE_STROOPS && { maxTransactionFeeStroops: Number(process.env.MAX_FEE_STROOPS) }),
+  }),
 );
 
 const log = [];

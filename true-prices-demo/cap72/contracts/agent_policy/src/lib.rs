@@ -24,9 +24,14 @@ use soroban_sdk::{
 
 const DAY_SECONDS: u64 = 86_400;
 const LEDGERS_PER_DAY: u32 = 17_280;
-// Keep the rules and the day buckets alive for about a month.
+// Keep the rules alive for about a month.
 const TTL_THRESHOLD: u32 = LEDGERS_PER_DAY * 7;
 const TTL_EXTEND_TO: u32 = LEDGERS_PER_DAY * 30;
+// A day bucket only matters until its day ends, so it lives in temporary
+// storage. Every write extends it to two days, which outlives its day. New
+// persistent entries pay rent for the network's long minimum TTL, which made the
+// first payment of each day cost about 35x the others on testnet.
+const BUCKET_TTL: u32 = LEDGERS_PER_DAY * 2;
 
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
@@ -66,7 +71,7 @@ enum DataKey {
     Owner,
     Wallet,
     Rules,
-    /// Amount spent on a given UTC day (ledger timestamp / 86400).
+    /// Amount spent on a given UTC day (ledger timestamp / 86400). Temporary storage.
     Spent(u64),
 }
 
@@ -101,7 +106,7 @@ fn today(env: &Env) -> u64 {
 
 fn spent_on(env: &Env, day: u64) -> i128 {
     env.storage()
-        .persistent()
+        .temporary()
         .get(&DataKey::Spent(day))
         .unwrap_or(0)
 }
@@ -214,8 +219,8 @@ impl CustomAccountInterface for AgentPolicy {
             return Err(PolicyError::DailyCapExceeded);
         }
         let key = DataKey::Spent(day);
-        env.storage().persistent().set(&key, &spent);
-        env.storage().persistent().extend_ttl(&key, TTL_THRESHOLD, TTL_EXTEND_TO);
+        env.storage().temporary().set(&key, &spent);
+        env.storage().temporary().extend_ttl(&key, BUCKET_TTL, BUCKET_TTL);
         env.storage().instance().extend_ttl(TTL_THRESHOLD, TTL_EXTEND_TO);
         Ok(())
     }

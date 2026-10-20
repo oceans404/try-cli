@@ -33,7 +33,7 @@ echo "USDC SAC $USDC_SAC"
 
 step "USDC trustlines (funder, both sellers)"
 for id in funder seller seller2; do
-  if $S token balance --network "$NETWORK" --id "$USDC_SAC" --address "$(addr $id)" >/dev/null 2>&1; then
+  if $S token balance --network "$NETWORK" --id "$USDC_SAC" --account "$(addr $id)" >/dev/null 2>&1; then
     echo "cap72-$id already trusts USDC"
   else
     $S tx new change-trust --source "cap72-$id" --network "$NETWORK" --line "$USDC" >/dev/null && echo "cap72-$id trusts USDC"
@@ -41,14 +41,14 @@ for id in funder seller seller2; do
 done
 
 step "Funder buys USDC on the DEX"
-bal=$($S token balance --network "$NETWORK" --id "$USDC_SAC" --address "$(addr funder)" 2>/dev/null | tr -dc 0-9)
+bal=$($S token balance --network "$NETWORK" --id "$USDC_SAC" --account "$(addr funder)" 2>/dev/null | tr -dc 0-9)
 if [ "${bal:-0}" -lt 200000000 ]; then
   # 30 USDC for about 1 XLM each; send-max allows up to 3 XLM per USDC.
   $S tx new path-payment-strict-receive --source cap72-funder --network "$NETWORK" \
     --send-asset native --send-max 900000000 --dest-asset "$USDC" --dest-amount 300000000 \
     --destination "$(addr funder)" >/dev/null
 fi
-echo "funder holds $($S token balance --network "$NETWORK" --id "$USDC_SAC" --address "$(addr funder)") stroops of USDC"
+echo "funder holds $($S token balance --network "$NETWORK" --id "$USDC_SAC" --account "$(addr funder)") stroops of USDC"
 
 step "agent_policy contract"
 if [ ! -f .env ] || ! grep -q '^POLICY_ID=' .env || [ "${1:-}" = "--redeploy" ]; then
