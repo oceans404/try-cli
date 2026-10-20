@@ -1,0 +1,93 @@
+diff --git a/Stellar-transaction.x b/Stellar-transaction.x
+index 11cacd7..1f4e372 100644
+--- a/Stellar-transaction.x
++++ b/Stellar-transaction.x
+@@ -1407,6 +1407,11 @@ enum SetOptionsResultCode
+     SET_OPTIONS_INVALID_HOME_DOMAIN = -9,    // malformed home domain
+     SET_OPTIONS_AUTH_REVOCABLE_REQUIRED =
+         -10 // auth revocable is required for clawback
++#ifdef CAP_0072_DELEGATED_SIGNERS
++    ,
++    // A signer with unsupported type was specified.
++    SET_OPTIONS_SIGNER_TYPE_NOT_SUPPORTED = -11
++#endif
+ };
+ 
+ union SetOptionsResult switch (SetOptionsResultCode code)
+@@ -1424,6 +1429,10 @@ case SET_OPTIONS_BAD_SIGNER:
+ case SET_OPTIONS_INVALID_HOME_DOMAIN:
+ case SET_OPTIONS_AUTH_REVOCABLE_REQUIRED:
+     void;
++#ifdef CAP_0072_DELEGATED_SIGNERS
++case SET_OPTIONS_SIGNER_TYPE_NOT_SUPPORTED:
++    void;
++#endif
+ };
+ 
+ /******* ChangeTrust Result ********/
+@@ -2037,6 +2046,13 @@ enum TransactionResultCode
+     txMALFORMED = -16,              // precondition is invalid
+     txSOROBAN_INVALID = -17,        // soroban-specific preconditions were not met
+     txFROZEN_KEY_ACCESSED = -18     // a 'frozen' ledger key is accessed by any operation
++#ifdef CAP_0072_DELEGATED_SIGNERS
++    ,
++    // Transaction had an extra signer of type SIGNER_KEY_TYPE_SC_DELEGATED,
++    // which is not supported. (CAP-0072 text says -18; that code is taken by
++    // txFROZEN_KEY_ACCESSED on main, so the prototype uses -19.)
++    txACCOUNT_DELEGATED_SIGNER_NOT_SUPPORTED = -19
++#endif
+ };
+ 
+ // InnerTransactionResult must be binary compatible with TransactionResult
+@@ -2070,6 +2086,10 @@ struct InnerTransactionResult
+     case txSOROBAN_INVALID:
+     case txFROZEN_KEY_ACCESSED:
+         void;
++#ifdef CAP_0072_DELEGATED_SIGNERS
++    case txACCOUNT_DELEGATED_SIGNER_NOT_SUPPORTED:
++        void;
++#endif
+     }
+     result;
+ 
+@@ -2118,6 +2138,10 @@ struct TransactionResult
+     case txSOROBAN_INVALID:
+     case txFROZEN_KEY_ACCESSED:
+         void;
++#ifdef CAP_0072_DELEGATED_SIGNERS
++    case txACCOUNT_DELEGATED_SIGNER_NOT_SUPPORTED:
++        void;
++#endif
+     }
+     result;
+ 
+diff --git a/Stellar-types.x b/Stellar-types.x
+index 4a9d5bd..c933601 100644
+--- a/Stellar-types.x
++++ b/Stellar-types.x
+@@ -50,6 +50,11 @@ enum SignerKeyType
+     SIGNER_KEY_TYPE_PRE_AUTH_TX = KEY_TYPE_PRE_AUTH_TX,
+     SIGNER_KEY_TYPE_HASH_X = KEY_TYPE_HASH_X,
+     SIGNER_KEY_TYPE_ED25519_SIGNED_PAYLOAD = KEY_TYPE_ED25519_SIGNED_PAYLOAD
++#ifdef CAP_0072_DELEGATED_SIGNERS
++    ,
++    // CAP-0072: a 'delegated' signer, usable only for Soroban authorization.
++    SIGNER_KEY_TYPE_SC_DELEGATED = 4
++#endif
+ };
+ 
+ union PublicKey switch (PublicKeyType type)
+@@ -76,6 +81,13 @@ case SIGNER_KEY_TYPE_ED25519_SIGNED_PAYLOAD:
+         /* Payload to be raw signed by ed25519. */
+         opaque payload<64>;
+     } ed25519SignedPayload;
++#ifdef CAP_0072_DELEGATED_SIGNERS
++case SIGNER_KEY_TYPE_SC_DELEGATED:
++    /* CAP-0072: address whose `__check_auth` (or built-in account auth) is
++       consulted via `delegate_account_auth` instead of a signature check.
++       Only SC_ADDRESS_TYPE_ACCOUNT and SC_ADDRESS_TYPE_CONTRACT are allowed. */
++    SCAddress delegatedSCSigner;
++#endif
+ };
+ 
+ // variable size as the size depends on the signature scheme used

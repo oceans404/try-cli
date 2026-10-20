@@ -1,0 +1,724 @@
+diff --git a/Cargo.toml b/Cargo.toml
+index 4a6345c..4158806 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -48,6 +48,7 @@ alloc = ["dep:hex", "dep:stellar-strkey", "escape-bytes/alloc", "dep:ethnum"]
+ 
+ # Features from the XDR
+ test_feature = []
++cap_0072_delegated_signers = []
+ 
+ # Features available without any new dependencies.
+ type_enum = []
+diff --git a/src/generated/const/inner_transaction_result_result.rs b/src/generated/const/inner_transaction_result_result.rs
+index 30f9d9f..5731081 100644
+--- a/src/generated/const/inner_transaction_result_result.rs
++++ b/src/generated/const/inner_transaction_result_result.rs
+@@ -25,6 +25,8 @@ pub enum InnerTransactionResultResult {
+     TxMalformed,
+     TxSorobanInvalid,
+     TxFrozenKeyAccessed,
++    #[cfg(feature = "cap_0072_delegated_signers")]
++    TxAccountDelegatedSignerNotSupported,
+ }
+ 
+ impl InnerTransactionResultResult {
+@@ -50,6 +52,10 @@ impl InnerTransactionResultResult {
+             Self::TxMalformed => TransactionResultCode::TxMalformed,
+             Self::TxSorobanInvalid => TransactionResultCode::TxSorobanInvalid,
+             Self::TxFrozenKeyAccessed => TransactionResultCode::TxFrozenKeyAccessed,
++            #[cfg(feature = "cap_0072_delegated_signers")]
++            Self::TxAccountDelegatedSignerNotSupported => {
++                TransactionResultCode::TxAccountDelegatedSignerNotSupported
++            }
+         }
+     }
+ }
+@@ -123,6 +129,8 @@ impl ConstWriter<'_> {
+             InnerTransactionResultResult::TxMalformed => {}
+             InnerTransactionResultResult::TxSorobanInvalid => {}
+             InnerTransactionResultResult::TxFrozenKeyAccessed => {}
++            #[cfg(feature = "cap_0072_delegated_signers")]
++            InnerTransactionResultResult::TxAccountDelegatedSignerNotSupported => {}
+         }
+     }
+ }
+diff --git a/src/generated/const/set_options_result.rs b/src/generated/const/set_options_result.rs
+index 72ffd91..edf4aae 100644
+--- a/src/generated/const/set_options_result.rs
++++ b/src/generated/const/set_options_result.rs
+@@ -56,6 +56,8 @@ impl ConstWriter<'_> {
+             SetOptionsResult::BadSigner => {}
+             SetOptionsResult::InvalidHomeDomain => {}
+             SetOptionsResult::AuthRevocableRequired => {}
++            #[cfg(feature = "cap_0072_delegated_signers")]
++            SetOptionsResult::SignerTypeNotSupported => {}
+         }
+     }
+ }
+diff --git a/src/generated/const/signer_key.rs b/src/generated/const/signer_key.rs
+index deec1de..d534537 100644
+--- a/src/generated/const/signer_key.rs
++++ b/src/generated/const/signer_key.rs
+@@ -11,6 +11,8 @@ pub enum SignerKey {
+     PreAuthTx(Uint256),
+     HashX(Uint256),
+     Ed25519SignedPayload(SignerKeyEd25519SignedPayload),
++    #[cfg(feature = "cap_0072_delegated_signers")]
++    ScDelegated(ScAddress),
+ }
+ 
+ impl SignerKey {
+@@ -22,6 +24,8 @@ impl SignerKey {
+             Self::PreAuthTx(_) => SignerKeyType::PreAuthTx,
+             Self::HashX(_) => SignerKeyType::HashX,
+             Self::Ed25519SignedPayload(_) => SignerKeyType::Ed25519SignedPayload,
++            #[cfg(feature = "cap_0072_delegated_signers")]
++            Self::ScDelegated(_) => SignerKeyType::ScDelegated,
+         }
+     }
+ }
+@@ -82,6 +86,10 @@ impl ConstWriter<'_> {
+             SignerKey::Ed25519SignedPayload(value) => {
+                 self.write_type_signer_key_ed25519_signed_payload(value);
+             }
++            #[cfg(feature = "cap_0072_delegated_signers")]
++            SignerKey::ScDelegated(value) => {
++                self.write_type_sc_address(value);
++            }
+         }
+     }
+ 
+diff --git a/src/generated/const/transaction_result_result.rs b/src/generated/const/transaction_result_result.rs
+index 437677d..795acd3 100644
+--- a/src/generated/const/transaction_result_result.rs
++++ b/src/generated/const/transaction_result_result.rs
+@@ -27,6 +27,8 @@ pub enum TransactionResultResult {
+     TxMalformed,
+     TxSorobanInvalid,
+     TxFrozenKeyAccessed,
++    #[cfg(feature = "cap_0072_delegated_signers")]
++    TxAccountDelegatedSignerNotSupported,
+ }
+ 
+ impl TransactionResultResult {
+@@ -54,6 +56,10 @@ impl TransactionResultResult {
+             Self::TxMalformed => TransactionResultCode::TxMalformed,
+             Self::TxSorobanInvalid => TransactionResultCode::TxSorobanInvalid,
+             Self::TxFrozenKeyAccessed => TransactionResultCode::TxFrozenKeyAccessed,
++            #[cfg(feature = "cap_0072_delegated_signers")]
++            Self::TxAccountDelegatedSignerNotSupported => {
++                TransactionResultCode::TxAccountDelegatedSignerNotSupported
++            }
+         }
+     }
+ }
+@@ -130,6 +136,8 @@ impl ConstWriter<'_> {
+             TransactionResultResult::TxMalformed => {}
+             TransactionResultResult::TxSorobanInvalid => {}
+             TransactionResultResult::TxFrozenKeyAccessed => {}
++            #[cfg(feature = "cap_0072_delegated_signers")]
++            TransactionResultResult::TxAccountDelegatedSignerNotSupported => {}
+         }
+     }
+ }
+diff --git a/src/generated/inner_transaction_result.rs b/src/generated/inner_transaction_result.rs
+index 165ef98..0e66925 100644
+--- a/src/generated/inner_transaction_result.rs
++++ b/src/generated/inner_transaction_result.rs
+@@ -33,6 +33,10 @@ use super::*;
+ ///     case txSOROBAN_INVALID:
+ ///     case txFROZEN_KEY_ACCESSED:
+ ///         void;
++/// #ifdef CAP_0072_DELEGATED_SIGNERS
++///     case txACCOUNT_DELEGATED_SIGNER_NOT_SUPPORTED:
++///         void;
++/// #endif
+ ///     }
+ ///     result;
+ ///
+diff --git a/src/generated/inner_transaction_result_result.rs b/src/generated/inner_transaction_result_result.rs
+index 478fa4d..f9520f1 100644
+--- a/src/generated/inner_transaction_result_result.rs
++++ b/src/generated/inner_transaction_result_result.rs
+@@ -28,6 +28,10 @@ use super::*;
+ ///     case txSOROBAN_INVALID:
+ ///     case txFROZEN_KEY_ACCESSED:
+ ///         void;
++/// #ifdef CAP_0072_DELEGATED_SIGNERS
++///     case txACCOUNT_DELEGATED_SIGNER_NOT_SUPPORTED:
++///         void;
++/// #endif
+ ///     }
+ /// ```
+ ///
+@@ -62,6 +66,8 @@ pub enum InnerTransactionResultResult {
+     TxMalformed,
+     TxSorobanInvalid,
+     TxFrozenKeyAccessed,
++    #[cfg(feature = "cap_0072_delegated_signers")]
++    TxAccountDelegatedSignerNotSupported,
+ }
+ 
+ #[cfg(feature = "alloc")]
+@@ -91,6 +97,8 @@ impl InnerTransactionResultResult {
+         TransactionResultCode::TxMalformed,
+         TransactionResultCode::TxSorobanInvalid,
+         TransactionResultCode::TxFrozenKeyAccessed,
++        #[cfg(feature = "cap_0072_delegated_signers")]
++        TransactionResultCode::TxAccountDelegatedSignerNotSupported,
+     ];
+     pub const VARIANTS: [TransactionResultCode; Self::_VARIANTS.len()] = {
+         let mut arr = [Self::_VARIANTS[0]; Self::_VARIANTS.len()];
+@@ -120,6 +128,8 @@ impl InnerTransactionResultResult {
+         "TxMalformed",
+         "TxSorobanInvalid",
+         "TxFrozenKeyAccessed",
++        #[cfg(feature = "cap_0072_delegated_signers")]
++        "TxAccountDelegatedSignerNotSupported",
+     ];
+     pub const VARIANTS_STR: [&'static str; Self::_VARIANTS_STR.len()] = {
+         let mut arr = [Self::_VARIANTS_STR[0]; Self::_VARIANTS_STR.len()];
+@@ -152,6 +162,8 @@ impl InnerTransactionResultResult {
+             Self::TxMalformed => "TxMalformed",
+             Self::TxSorobanInvalid => "TxSorobanInvalid",
+             Self::TxFrozenKeyAccessed => "TxFrozenKeyAccessed",
++            #[cfg(feature = "cap_0072_delegated_signers")]
++            Self::TxAccountDelegatedSignerNotSupported => "TxAccountDelegatedSignerNotSupported",
+         }
+     }
+ 
+@@ -177,6 +189,10 @@ impl InnerTransactionResultResult {
+             Self::TxMalformed => TransactionResultCode::TxMalformed,
+             Self::TxSorobanInvalid => TransactionResultCode::TxSorobanInvalid,
+             Self::TxFrozenKeyAccessed => TransactionResultCode::TxFrozenKeyAccessed,
++            #[cfg(feature = "cap_0072_delegated_signers")]
++            Self::TxAccountDelegatedSignerNotSupported => {
++                TransactionResultCode::TxAccountDelegatedSignerNotSupported
++            }
+         }
+     }
+ 
+@@ -237,6 +253,10 @@ impl ReadXdr for InnerTransactionResultResult {
+                 TransactionResultCode::TxMalformed => Self::TxMalformed,
+                 TransactionResultCode::TxSorobanInvalid => Self::TxSorobanInvalid,
+                 TransactionResultCode::TxFrozenKeyAccessed => Self::TxFrozenKeyAccessed,
++                #[cfg(feature = "cap_0072_delegated_signers")]
++                TransactionResultCode::TxAccountDelegatedSignerNotSupported => {
++                    Self::TxAccountDelegatedSignerNotSupported
++                }
+                 #[allow(unreachable_patterns)]
+                 _ => return Err(Error::Invalid),
+             };
+@@ -270,6 +290,8 @@ impl WriteXdr for InnerTransactionResultResult {
+                 Self::TxMalformed => ().write_xdr(w)?,
+                 Self::TxSorobanInvalid => ().write_xdr(w)?,
+                 Self::TxFrozenKeyAccessed => ().write_xdr(w)?,
++                #[cfg(feature = "cap_0072_delegated_signers")]
++                Self::TxAccountDelegatedSignerNotSupported => ().write_xdr(w)?,
+             };
+             Ok(())
+         })
+diff --git a/src/generated/set_options_result.rs b/src/generated/set_options_result.rs
+index 02498bf..d17bf05 100644
+--- a/src/generated/set_options_result.rs
++++ b/src/generated/set_options_result.rs
+@@ -19,6 +19,10 @@ use super::*;
+ /// case SET_OPTIONS_INVALID_HOME_DOMAIN:
+ /// case SET_OPTIONS_AUTH_REVOCABLE_REQUIRED:
+ ///     void;
++/// #ifdef CAP_0072_DELEGATED_SIGNERS
++/// case SET_OPTIONS_SIGNER_TYPE_NOT_SUPPORTED:
++///     void;
++/// #endif
+ /// };
+ /// ```
+ ///
+@@ -46,6 +50,8 @@ pub enum SetOptionsResult {
+     BadSigner,
+     InvalidHomeDomain,
+     AuthRevocableRequired,
++    #[cfg(feature = "cap_0072_delegated_signers")]
++    SignerTypeNotSupported,
+ }
+ 
+ #[cfg(feature = "alloc")]
+@@ -68,6 +74,8 @@ impl SetOptionsResult {
+         SetOptionsResultCode::BadSigner,
+         SetOptionsResultCode::InvalidHomeDomain,
+         SetOptionsResultCode::AuthRevocableRequired,
++        #[cfg(feature = "cap_0072_delegated_signers")]
++        SetOptionsResultCode::SignerTypeNotSupported,
+     ];
+     pub const VARIANTS: [SetOptionsResultCode; Self::_VARIANTS.len()] = {
+         let mut arr = [Self::_VARIANTS[0]; Self::_VARIANTS.len()];
+@@ -90,6 +98,8 @@ impl SetOptionsResult {
+         "BadSigner",
+         "InvalidHomeDomain",
+         "AuthRevocableRequired",
++        #[cfg(feature = "cap_0072_delegated_signers")]
++        "SignerTypeNotSupported",
+     ];
+     pub const VARIANTS_STR: [&'static str; Self::_VARIANTS_STR.len()] = {
+         let mut arr = [Self::_VARIANTS_STR[0]; Self::_VARIANTS_STR.len()];
+@@ -115,6 +125,8 @@ impl SetOptionsResult {
+             Self::BadSigner => "BadSigner",
+             Self::InvalidHomeDomain => "InvalidHomeDomain",
+             Self::AuthRevocableRequired => "AuthRevocableRequired",
++            #[cfg(feature = "cap_0072_delegated_signers")]
++            Self::SignerTypeNotSupported => "SignerTypeNotSupported",
+         }
+     }
+ 
+@@ -133,6 +145,8 @@ impl SetOptionsResult {
+             Self::BadSigner => SetOptionsResultCode::BadSigner,
+             Self::InvalidHomeDomain => SetOptionsResultCode::InvalidHomeDomain,
+             Self::AuthRevocableRequired => SetOptionsResultCode::AuthRevocableRequired,
++            #[cfg(feature = "cap_0072_delegated_signers")]
++            Self::SignerTypeNotSupported => SetOptionsResultCode::SignerTypeNotSupported,
+         }
+     }
+ 
+@@ -182,6 +196,8 @@ impl ReadXdr for SetOptionsResult {
+                 SetOptionsResultCode::BadSigner => Self::BadSigner,
+                 SetOptionsResultCode::InvalidHomeDomain => Self::InvalidHomeDomain,
+                 SetOptionsResultCode::AuthRevocableRequired => Self::AuthRevocableRequired,
++                #[cfg(feature = "cap_0072_delegated_signers")]
++                SetOptionsResultCode::SignerTypeNotSupported => Self::SignerTypeNotSupported,
+                 #[allow(unreachable_patterns)]
+                 _ => return Err(Error::Invalid),
+             };
+@@ -208,6 +224,8 @@ impl WriteXdr for SetOptionsResult {
+                 Self::BadSigner => ().write_xdr(w)?,
+                 Self::InvalidHomeDomain => ().write_xdr(w)?,
+                 Self::AuthRevocableRequired => ().write_xdr(w)?,
++                #[cfg(feature = "cap_0072_delegated_signers")]
++                Self::SignerTypeNotSupported => ().write_xdr(w)?,
+             };
+             Ok(())
+         })
+diff --git a/src/generated/set_options_result_code.rs b/src/generated/set_options_result_code.rs
+index 8b373db..b74fdcf 100644
+--- a/src/generated/set_options_result_code.rs
++++ b/src/generated/set_options_result_code.rs
+@@ -20,6 +20,11 @@ use super::*;
+ ///     SET_OPTIONS_INVALID_HOME_DOMAIN = -9,    // malformed home domain
+ ///     SET_OPTIONS_AUTH_REVOCABLE_REQUIRED =
+ ///         -10 // auth revocable is required for clawback
++/// #ifdef CAP_0072_DELEGATED_SIGNERS
++///     ,
++///     // A signer with unsupported type was specified.
++///     SET_OPTIONS_SIGNER_TYPE_NOT_SUPPORTED = -11
++/// #endif
+ /// };
+ /// ```
+ ///
+@@ -47,6 +52,8 @@ pub enum SetOptionsResultCode {
+     BadSigner = -8,
+     InvalidHomeDomain = -9,
+     AuthRevocableRequired = -10,
++    #[cfg(feature = "cap_0072_delegated_signers")]
++    SignerTypeNotSupported = -11,
+ }
+ 
+ impl SetOptionsResultCode {
+@@ -62,6 +69,8 @@ impl SetOptionsResultCode {
+         SetOptionsResultCode::BadSigner,
+         SetOptionsResultCode::InvalidHomeDomain,
+         SetOptionsResultCode::AuthRevocableRequired,
++        #[cfg(feature = "cap_0072_delegated_signers")]
++        SetOptionsResultCode::SignerTypeNotSupported,
+     ];
+     pub const VARIANTS: [SetOptionsResultCode; Self::_VARIANTS.len()] = {
+         let mut arr = [Self::_VARIANTS[0]; Self::_VARIANTS.len()];
+@@ -84,6 +93,8 @@ impl SetOptionsResultCode {
+         "BadSigner",
+         "InvalidHomeDomain",
+         "AuthRevocableRequired",
++        #[cfg(feature = "cap_0072_delegated_signers")]
++        "SignerTypeNotSupported",
+     ];
+     pub const VARIANTS_STR: [&'static str; Self::_VARIANTS_STR.len()] = {
+         let mut arr = [Self::_VARIANTS_STR[0]; Self::_VARIANTS_STR.len()];
+@@ -109,6 +120,8 @@ impl SetOptionsResultCode {
+             Self::BadSigner => "BadSigner",
+             Self::InvalidHomeDomain => "InvalidHomeDomain",
+             Self::AuthRevocableRequired => "AuthRevocableRequired",
++            #[cfg(feature = "cap_0072_delegated_signers")]
++            Self::SignerTypeNotSupported => "SignerTypeNotSupported",
+         }
+     }
+ 
+@@ -155,6 +168,8 @@ impl TryFrom<i32> for SetOptionsResultCode {
+             -8 => SetOptionsResultCode::BadSigner,
+             -9 => SetOptionsResultCode::InvalidHomeDomain,
+             -10 => SetOptionsResultCode::AuthRevocableRequired,
++            #[cfg(feature = "cap_0072_delegated_signers")]
++            -11 => SetOptionsResultCode::SignerTypeNotSupported,
+             #[allow(unreachable_patterns)]
+             _ => return Err(Error::Invalid),
+         };
+diff --git a/src/generated/signer_key.rs b/src/generated/signer_key.rs
+index 1321c84..17828ab 100644
+--- a/src/generated/signer_key.rs
++++ b/src/generated/signer_key.rs
+@@ -22,6 +22,13 @@ use super::*;
+ ///         /* Payload to be raw signed by ed25519. */
+ ///         opaque payload<64>;
+ ///     } ed25519SignedPayload;
++/// #ifdef CAP_0072_DELEGATED_SIGNERS
++/// case SIGNER_KEY_TYPE_SC_DELEGATED:
++///     /* CAP-0072: address whose `__check_auth` (or built-in account auth) is
++///        consulted via `delegate_account_auth` instead of a signature check.
++///        Only SC_ADDRESS_TYPE_ACCOUNT and SC_ADDRESS_TYPE_CONTRACT are allowed. */
++///     SCAddress delegatedSCSigner;
++/// #endif
+ /// };
+ /// ```
+ ///
+@@ -39,6 +46,8 @@ pub enum SignerKey {
+     PreAuthTx(Uint256),
+     HashX(Uint256),
+     Ed25519SignedPayload(SignerKeyEd25519SignedPayload),
++    #[cfg(feature = "cap_0072_delegated_signers")]
++    ScDelegated(ScAddress),
+ }
+ 
+ #[cfg(feature = "alloc")]
+@@ -54,6 +63,8 @@ impl SignerKey {
+         SignerKeyType::PreAuthTx,
+         SignerKeyType::HashX,
+         SignerKeyType::Ed25519SignedPayload,
++        #[cfg(feature = "cap_0072_delegated_signers")]
++        SignerKeyType::ScDelegated,
+     ];
+     pub const VARIANTS: [SignerKeyType; Self::_VARIANTS.len()] = {
+         let mut arr = [Self::_VARIANTS[0]; Self::_VARIANTS.len()];
+@@ -64,7 +75,14 @@ impl SignerKey {
+         }
+         arr
+     };
+-    const _VARIANTS_STR: &[&str] = &["Ed25519", "PreAuthTx", "HashX", "Ed25519SignedPayload"];
++    const _VARIANTS_STR: &[&str] = &[
++        "Ed25519",
++        "PreAuthTx",
++        "HashX",
++        "Ed25519SignedPayload",
++        #[cfg(feature = "cap_0072_delegated_signers")]
++        "ScDelegated",
++    ];
+     pub const VARIANTS_STR: [&'static str; Self::_VARIANTS_STR.len()] = {
+         let mut arr = [Self::_VARIANTS_STR[0]; Self::_VARIANTS_STR.len()];
+         let mut i = 1;
+@@ -82,6 +100,8 @@ impl SignerKey {
+             Self::PreAuthTx(_) => "PreAuthTx",
+             Self::HashX(_) => "HashX",
+             Self::Ed25519SignedPayload(_) => "Ed25519SignedPayload",
++            #[cfg(feature = "cap_0072_delegated_signers")]
++            Self::ScDelegated(_) => "ScDelegated",
+         }
+     }
+ 
+@@ -93,6 +113,8 @@ impl SignerKey {
+             Self::PreAuthTx(_) => SignerKeyType::PreAuthTx,
+             Self::HashX(_) => SignerKeyType::HashX,
+             Self::Ed25519SignedPayload(_) => SignerKeyType::Ed25519SignedPayload,
++            #[cfg(feature = "cap_0072_delegated_signers")]
++            Self::ScDelegated(_) => SignerKeyType::ScDelegated,
+         }
+     }
+ 
+@@ -137,6 +159,8 @@ impl ReadXdr for SignerKey {
+                 SignerKeyType::Ed25519SignedPayload => {
+                     Self::Ed25519SignedPayload(SignerKeyEd25519SignedPayload::read_xdr(r)?)
+                 }
++                #[cfg(feature = "cap_0072_delegated_signers")]
++                SignerKeyType::ScDelegated => Self::ScDelegated(ScAddress::read_xdr(r)?),
+                 #[allow(unreachable_patterns)]
+                 _ => return Err(Error::Invalid),
+             };
+@@ -156,6 +180,8 @@ impl WriteXdr for SignerKey {
+                 Self::PreAuthTx(v) => v.write_xdr(w)?,
+                 Self::HashX(v) => v.write_xdr(w)?,
+                 Self::Ed25519SignedPayload(v) => v.write_xdr(w)?,
++                #[cfg(feature = "cap_0072_delegated_signers")]
++                Self::ScDelegated(v) => v.write_xdr(w)?,
+             };
+             Ok(())
+         })
+diff --git a/src/generated/signer_key_type.rs b/src/generated/signer_key_type.rs
+index 3a39e7e..e273ecd 100644
+--- a/src/generated/signer_key_type.rs
++++ b/src/generated/signer_key_type.rs
+@@ -10,6 +10,11 @@ use super::*;
+ ///     SIGNER_KEY_TYPE_PRE_AUTH_TX = KEY_TYPE_PRE_AUTH_TX,
+ ///     SIGNER_KEY_TYPE_HASH_X = KEY_TYPE_HASH_X,
+ ///     SIGNER_KEY_TYPE_ED25519_SIGNED_PAYLOAD = KEY_TYPE_ED25519_SIGNED_PAYLOAD
++/// #ifdef CAP_0072_DELEGATED_SIGNERS
++///     ,
++///     // CAP-0072: a 'delegated' signer, usable only for Soroban authorization.
++///     SIGNER_KEY_TYPE_SC_DELEGATED = 4
++/// #endif
+ /// };
+ /// ```
+ ///
+@@ -30,6 +35,8 @@ pub enum SignerKeyType {
+     PreAuthTx = 1,
+     HashX = 2,
+     Ed25519SignedPayload = 3,
++    #[cfg(feature = "cap_0072_delegated_signers")]
++    ScDelegated = 4,
+ }
+ 
+ impl SignerKeyType {
+@@ -38,6 +45,8 @@ impl SignerKeyType {
+         SignerKeyType::PreAuthTx,
+         SignerKeyType::HashX,
+         SignerKeyType::Ed25519SignedPayload,
++        #[cfg(feature = "cap_0072_delegated_signers")]
++        SignerKeyType::ScDelegated,
+     ];
+     pub const VARIANTS: [SignerKeyType; Self::_VARIANTS.len()] = {
+         let mut arr = [Self::_VARIANTS[0]; Self::_VARIANTS.len()];
+@@ -48,7 +57,14 @@ impl SignerKeyType {
+         }
+         arr
+     };
+-    const _VARIANTS_STR: &[&str] = &["Ed25519", "PreAuthTx", "HashX", "Ed25519SignedPayload"];
++    const _VARIANTS_STR: &[&str] = &[
++        "Ed25519",
++        "PreAuthTx",
++        "HashX",
++        "Ed25519SignedPayload",
++        #[cfg(feature = "cap_0072_delegated_signers")]
++        "ScDelegated",
++    ];
+     pub const VARIANTS_STR: [&'static str; Self::_VARIANTS_STR.len()] = {
+         let mut arr = [Self::_VARIANTS_STR[0]; Self::_VARIANTS_STR.len()];
+         let mut i = 1;
+@@ -66,6 +82,8 @@ impl SignerKeyType {
+             Self::PreAuthTx => "PreAuthTx",
+             Self::HashX => "HashX",
+             Self::Ed25519SignedPayload => "Ed25519SignedPayload",
++            #[cfg(feature = "cap_0072_delegated_signers")]
++            Self::ScDelegated => "ScDelegated",
+         }
+     }
+ 
+@@ -105,6 +123,8 @@ impl TryFrom<i32> for SignerKeyType {
+             1 => SignerKeyType::PreAuthTx,
+             2 => SignerKeyType::HashX,
+             3 => SignerKeyType::Ed25519SignedPayload,
++            #[cfg(feature = "cap_0072_delegated_signers")]
++            4 => SignerKeyType::ScDelegated,
+             #[allow(unreachable_patterns)]
+             _ => return Err(Error::Invalid),
+         };
+diff --git a/src/generated/transaction_result.rs b/src/generated/transaction_result.rs
+index 19e5762..cc62c11 100644
+--- a/src/generated/transaction_result.rs
++++ b/src/generated/transaction_result.rs
+@@ -34,6 +34,10 @@ use super::*;
+ ///     case txSOROBAN_INVALID:
+ ///     case txFROZEN_KEY_ACCESSED:
+ ///         void;
++/// #ifdef CAP_0072_DELEGATED_SIGNERS
++///     case txACCOUNT_DELEGATED_SIGNER_NOT_SUPPORTED:
++///         void;
++/// #endif
+ ///     }
+ ///     result;
+ ///
+diff --git a/src/generated/transaction_result_code.rs b/src/generated/transaction_result_code.rs
+index 13e9b86..27b1109 100644
+--- a/src/generated/transaction_result_code.rs
++++ b/src/generated/transaction_result_code.rs
+@@ -30,6 +30,13 @@ use super::*;
+ ///     txMALFORMED = -16,              // precondition is invalid
+ ///     txSOROBAN_INVALID = -17,        // soroban-specific preconditions were not met
+ ///     txFROZEN_KEY_ACCESSED = -18     // a 'frozen' ledger key is accessed by any operation
++/// #ifdef CAP_0072_DELEGATED_SIGNERS
++///     ,
++///     // Transaction had an extra signer of type SIGNER_KEY_TYPE_SC_DELEGATED,
++///     // which is not supported. (CAP-0072 text says -18; that code is taken by
++///     // txFROZEN_KEY_ACCESSED on main, so the prototype uses -19.)
++///     txACCOUNT_DELEGATED_SIGNER_NOT_SUPPORTED = -19
++/// #endif
+ /// };
+ /// ```
+ ///
+@@ -66,6 +73,8 @@ pub enum TransactionResultCode {
+     TxMalformed = -16,
+     TxSorobanInvalid = -17,
+     TxFrozenKeyAccessed = -18,
++    #[cfg(feature = "cap_0072_delegated_signers")]
++    TxAccountDelegatedSignerNotSupported = -19,
+ }
+ 
+ impl TransactionResultCode {
+@@ -90,6 +99,8 @@ impl TransactionResultCode {
+         TransactionResultCode::TxMalformed,
+         TransactionResultCode::TxSorobanInvalid,
+         TransactionResultCode::TxFrozenKeyAccessed,
++        #[cfg(feature = "cap_0072_delegated_signers")]
++        TransactionResultCode::TxAccountDelegatedSignerNotSupported,
+     ];
+     pub const VARIANTS: [TransactionResultCode; Self::_VARIANTS.len()] = {
+         let mut arr = [Self::_VARIANTS[0]; Self::_VARIANTS.len()];
+@@ -121,6 +132,8 @@ impl TransactionResultCode {
+         "TxMalformed",
+         "TxSorobanInvalid",
+         "TxFrozenKeyAccessed",
++        #[cfg(feature = "cap_0072_delegated_signers")]
++        "TxAccountDelegatedSignerNotSupported",
+     ];
+     pub const VARIANTS_STR: [&'static str; Self::_VARIANTS_STR.len()] = {
+         let mut arr = [Self::_VARIANTS_STR[0]; Self::_VARIANTS_STR.len()];
+@@ -155,6 +168,8 @@ impl TransactionResultCode {
+             Self::TxMalformed => "TxMalformed",
+             Self::TxSorobanInvalid => "TxSorobanInvalid",
+             Self::TxFrozenKeyAccessed => "TxFrozenKeyAccessed",
++            #[cfg(feature = "cap_0072_delegated_signers")]
++            Self::TxAccountDelegatedSignerNotSupported => "TxAccountDelegatedSignerNotSupported",
+         }
+     }
+ 
+@@ -210,6 +225,8 @@ impl TryFrom<i32> for TransactionResultCode {
+             -16 => TransactionResultCode::TxMalformed,
+             -17 => TransactionResultCode::TxSorobanInvalid,
+             -18 => TransactionResultCode::TxFrozenKeyAccessed,
++            #[cfg(feature = "cap_0072_delegated_signers")]
++            -19 => TransactionResultCode::TxAccountDelegatedSignerNotSupported,
+             #[allow(unreachable_patterns)]
+             _ => return Err(Error::Invalid),
+         };
+diff --git a/src/generated/transaction_result_result.rs b/src/generated/transaction_result_result.rs
+index ceffab3..69e5814 100644
+--- a/src/generated/transaction_result_result.rs
++++ b/src/generated/transaction_result_result.rs
+@@ -30,6 +30,10 @@ use super::*;
+ ///     case txSOROBAN_INVALID:
+ ///     case txFROZEN_KEY_ACCESSED:
+ ///         void;
++/// #ifdef CAP_0072_DELEGATED_SIGNERS
++///     case txACCOUNT_DELEGATED_SIGNER_NOT_SUPPORTED:
++///         void;
++/// #endif
+ ///     }
+ /// ```
+ ///
+@@ -66,6 +70,8 @@ pub enum TransactionResultResult {
+     TxMalformed,
+     TxSorobanInvalid,
+     TxFrozenKeyAccessed,
++    #[cfg(feature = "cap_0072_delegated_signers")]
++    TxAccountDelegatedSignerNotSupported,
+ }
+ 
+ #[cfg(feature = "alloc")]
+@@ -97,6 +103,8 @@ impl TransactionResultResult {
+         TransactionResultCode::TxMalformed,
+         TransactionResultCode::TxSorobanInvalid,
+         TransactionResultCode::TxFrozenKeyAccessed,
++        #[cfg(feature = "cap_0072_delegated_signers")]
++        TransactionResultCode::TxAccountDelegatedSignerNotSupported,
+     ];
+     pub const VARIANTS: [TransactionResultCode; Self::_VARIANTS.len()] = {
+         let mut arr = [Self::_VARIANTS[0]; Self::_VARIANTS.len()];
+@@ -128,6 +136,8 @@ impl TransactionResultResult {
+         "TxMalformed",
+         "TxSorobanInvalid",
+         "TxFrozenKeyAccessed",
++        #[cfg(feature = "cap_0072_delegated_signers")]
++        "TxAccountDelegatedSignerNotSupported",
+     ];
+     pub const VARIANTS_STR: [&'static str; Self::_VARIANTS_STR.len()] = {
+         let mut arr = [Self::_VARIANTS_STR[0]; Self::_VARIANTS_STR.len()];
+@@ -162,6 +172,8 @@ impl TransactionResultResult {
+             Self::TxMalformed => "TxMalformed",
+             Self::TxSorobanInvalid => "TxSorobanInvalid",
+             Self::TxFrozenKeyAccessed => "TxFrozenKeyAccessed",
++            #[cfg(feature = "cap_0072_delegated_signers")]
++            Self::TxAccountDelegatedSignerNotSupported => "TxAccountDelegatedSignerNotSupported",
+         }
+     }
+ 
+@@ -189,6 +201,10 @@ impl TransactionResultResult {
+             Self::TxMalformed => TransactionResultCode::TxMalformed,
+             Self::TxSorobanInvalid => TransactionResultCode::TxSorobanInvalid,
+             Self::TxFrozenKeyAccessed => TransactionResultCode::TxFrozenKeyAccessed,
++            #[cfg(feature = "cap_0072_delegated_signers")]
++            Self::TxAccountDelegatedSignerNotSupported => {
++                TransactionResultCode::TxAccountDelegatedSignerNotSupported
++            }
+         }
+     }
+ 
+@@ -255,6 +271,10 @@ impl ReadXdr for TransactionResultResult {
+                 TransactionResultCode::TxMalformed => Self::TxMalformed,
+                 TransactionResultCode::TxSorobanInvalid => Self::TxSorobanInvalid,
+                 TransactionResultCode::TxFrozenKeyAccessed => Self::TxFrozenKeyAccessed,
++                #[cfg(feature = "cap_0072_delegated_signers")]
++                TransactionResultCode::TxAccountDelegatedSignerNotSupported => {
++                    Self::TxAccountDelegatedSignerNotSupported
++                }
+                 #[allow(unreachable_patterns)]
+                 _ => return Err(Error::Invalid),
+             };
+@@ -290,6 +310,8 @@ impl WriteXdr for TransactionResultResult {
+                 Self::TxMalformed => ().write_xdr(w)?,
+                 Self::TxSorobanInvalid => ().write_xdr(w)?,
+                 Self::TxFrozenKeyAccessed => ().write_xdr(w)?,
++                #[cfg(feature = "cap_0072_delegated_signers")]
++                Self::TxAccountDelegatedSignerNotSupported => ().write_xdr(w)?,
+             };
+             Ok(())
+         })
+diff --git a/src/lib.rs b/src/lib.rs
+index 63995e1..ac7d656 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -132,6 +132,8 @@ pub const VERSION: Version = Version {
+     features: &[
+         #[cfg(feature = "test_feature")]
+         "test_feature",
++        #[cfg(feature = "cap_0072_delegated_signers")]
++        "cap_0072_delegated_signers",
+     ],
+ };
+ 
+diff --git a/src/str.rs b/src/str.rs
+index f87cc2d..9fed40e 100644
+--- a/src/str.rs
++++ b/src/str.rs
+@@ -253,8 +253,17 @@ impl core::str::FromStr for SignerKey {
+                     payload: sp.payload().try_into()?,
+                 }),
+             ),
+-            stellar_strkey::Strkey::Contract(_)
+-            | stellar_strkey::Strkey::MuxedAccountEd25519(_)
++            // CAP-0072 prototype: a contract strkey parses as a delegated
++            // contract signer. A delegated G-account signer has no string
++            // form of its own (a G... strkey already means an ed25519 signer),
++            // so it can't be parsed here; see the HOST-PATCH open questions.
++            #[cfg(feature = "cap_0072_delegated_signers")]
++            stellar_strkey::Strkey::Contract(stellar_strkey::Contract(c)) => Ok(
++                SignerKey::ScDelegated(ScAddress::Contract(ContractId(Hash(c)))),
++            ),
++            #[cfg(not(feature = "cap_0072_delegated_signers"))]
++            stellar_strkey::Strkey::Contract(_) => Err(Error::Invalid),
++            stellar_strkey::Strkey::MuxedAccountEd25519(_)
+             | stellar_strkey::Strkey::LiquidityPool(_)
+             | stellar_strkey::Strkey::ClaimableBalance(_)
+             | stellar_strkey::Strkey::MuxedContract(_) => Err(Error::Invalid),
+@@ -286,6 +295,10 @@ impl core::fmt::Display for SignerKey {
+                 f.write_str(&s)?;
+             }
+             SignerKey::Ed25519SignedPayload(p) => p.fmt(f)?,
++            // CAP-0072 prototype: rendered as the delegate's own strkey. This
++            // is lossy for a delegated G-account (it reads back as ed25519).
++            #[cfg(feature = "cap_0072_delegated_signers")]
++            SignerKey::ScDelegated(addr) => addr.fmt(f)?,
+         }
+         Ok(())
+     }

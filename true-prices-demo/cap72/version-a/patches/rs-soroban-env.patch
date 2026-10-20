@@ -1,0 +1,1298 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index 60ee20d..d32b173 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -1978,8 +1978,6 @@ dependencies = [
+ [[package]]
+ name = "stellar-xdr"
+ version = "30.0.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "56f2fb2008b42fc746c0f6b46e375600068dd91f07748e9f1737c6341a2255f2"
+ dependencies = [
+  "arbitrary",
+  "base64",
+diff --git a/Cargo.toml b/Cargo.toml
+index 0cf8183..6ffa29a 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -42,8 +42,10 @@ package = "soroban-wasmi"
+ version = "=29.0.0"
+ 
+ # [patch."https://github.com/stellar/rs-stellar-xdr"]
+-# [patch.crates-io]
+-# stellar-xdr = { path = "../rs-stellar-xdr" }
++# CAP-0072 prototype: use the locally regenerated XDR crate that carries the
++# `cap_0072_delegated_signers` feature (new `SignerKey::ScDelegated` arm).
++[patch.crates-io]
++stellar-xdr = { path = "../rs-stellar-xdr" }
+ # [patch."https://github.com/stellar/wasmi"]
+ # soroban-wasmi = { path = "../wasmi/crates/wasmi/" }
+ # soroban-wasmi_core = { path = "../wasmi/crates/core/" }
+diff --git a/soroban-env-common/Cargo.toml b/soroban-env-common/Cargo.toml
+index ab0d9ac..dffdec0 100644
+--- a/soroban-env-common/Cargo.toml
++++ b/soroban-env-common/Cargo.toml
+@@ -37,7 +37,7 @@ std = ["stellar-xdr/std", "stellar-xdr/base64"]
+ serde = ["dep:serde", "stellar-xdr/serde"]
+ wasmi = ["dep:wasmi", "dep:wasmparser"]
+ testutils = ["dep:arbitrary", "stellar-xdr/arbitrary"]
+-next = ["soroban-env-macros/next"]
++next = ["soroban-env-macros/next", "stellar-xdr/cap_0072_delegated_signers"]
+ tracy = ["dep:tracy-client"]
+ shallow-val-hash = []
+ 
+diff --git a/soroban-env-host/src/auth.rs b/soroban-env-host/src/auth.rs
+index 7bc710d..692e025 100644
+--- a/soroban-env-host/src/auth.rs
++++ b/soroban-env-host/src/auth.rs
+@@ -1051,7 +1051,7 @@ impl AuthorizationManager {
+         let sc_addr = host.scaddress_from_address(address)?;
+         match sc_addr {
+             ScAddress::Account(acc) => {
+-                check_account_authentication(host, acc, signature_payload, signature)?
++                check_account_authentication(host, self, acc, signature_payload, signature)?
+             }
+             ScAddress::Contract(acc_contract) => host
+                 .call_n_internal(
+@@ -1109,6 +1109,33 @@ impl AuthorizationManager {
+         })
+     }
+ 
++    /// CAP-0072: returns true if the credentials of the address being
++    /// authenticated currently carry a delegated signer list
++    /// (`SorobanCredentialsAddressWithDelegates`). This is free of metering so
++    /// that accounts authenticated without delegates keep their exact costs.
++    #[cfg(feature = "next")]
++    pub(crate) fn has_delegated_signers_for_current_auth_check(
++        &self,
++        host: &Host,
++    ) -> Result<bool, HostError> {
++        self.with_current_authentication_frame(host, |frame| {
++            Ok(frame.delegated_auth_tracker.is_some())
++        })
++    }
++
++    /// CAP-0072: returns the authorization context (a vector of
++    /// `AuthorizationContext`) of the address being authenticated currently.
++    /// This is the same value that is passed to `__check_auth` of a custom
++    /// account; the built-in G-account authentication uses it to decide
++    /// which signature threshold applies.
++    #[cfg(feature = "next")]
++    pub(crate) fn get_context_for_current_auth_check(
++        &self,
++        host: &Host,
++    ) -> Result<Val, HostError> {
++        self.with_current_authentication_frame(host, |frame| Ok(frame.context))
++    }
++
+     // Require the `address` to have authorized the current contract invocation
+     // with provided args and within the current context (i.e. the current
+     // authorized call stack and for the current network).
+@@ -2685,9 +2712,13 @@ impl AccountAuthorizationTracker {
+                 context,
+             });
+         let auth_res = match sc_addr {
+-            ScAddress::Account(acc) => {
+-                check_account_authentication(host, acc, signature_payload, self.signature)
+-            }
++            ScAddress::Account(acc) => check_account_authentication(
++                host,
++                authorization_manager,
++                acc,
++                signature_payload,
++                self.signature,
++            ),
+             ScAddress::Contract(acc_contract) => check_account_contract_auth(
+                 host,
+                 &acc_contract,
+diff --git a/soroban-env-host/src/builtin_contracts/account_contract.rs b/soroban-env-host/src/builtin_contracts/account_contract.rs
+index 70a606c..35aed5f 100644
+--- a/soroban-env-host/src/builtin_contracts/account_contract.rs
++++ b/soroban-env-host/src/builtin_contracts/account_contract.rs
+@@ -3,7 +3,7 @@
+ // to a generic smart wallet contract that supports authentication and blanket
+ // context authorization.
+ use crate::{
+-    auth::{AuthorizedFunction, AuthorizedInvocation},
++    auth::{AuthorizationManager, AuthorizedFunction, AuthorizedInvocation},
+     builtin_contracts::{
+         base_types::{Address, BytesN, Vec as HostVec},
+         common_types::ContractExecutable,
+@@ -20,10 +20,18 @@ use crate::{
+     },
+     BytesObject, Env, ErrorHandler, HostError, Symbol, TryFromVal, TryIntoVal, Val,
+ };
++#[cfg(feature = "next")]
++use crate::xdr::{AccountEntry, ScAddress};
+ use core::cmp::Ordering;
+ 
+ const MAX_ACCOUNT_SIGNATURES: u32 = 20;
+ 
++/// CAP-0072 (delegated signers for G-accounts) applies from this ledger
++/// protocol version on. The `next` build of the host has interface protocol
++/// 31 but may also run protocol 30 ledgers, which must keep the old behavior.
++#[cfg(feature = "next")]
++const DELEGATED_SIGNERS_PROTOCOL_VERSION: u32 = 31;
++
+ use soroban_builtin_sdk_macros::contracttype;
+ 
+ pub const ACCOUNT_CONTRACT_CHECK_AUTH_FN_NAME: &str = "__check_auth";
+@@ -171,26 +179,176 @@ pub(crate) fn check_account_contract_auth(
+         .try_into()?)
+ }
+ 
++/// Returns true if CAP-0072 delegated signer semantics apply to the current
++/// ledger.
++#[cfg(feature = "next")]
++fn delegated_signers_enabled(host: &Host) -> Result<bool, HostError> {
++    Ok(host.get_ledger_protocol_version()? >= DELEGATED_SIGNERS_PROTOCOL_VERSION)
++}
++
++/// CAP-0072: authenticates every delegated signer provided for the current
++/// authentication frame and returns the sum of their weights on `account`.
++///
++/// The delegated signer list comes from the `delegates` of the
++/// `SorobanCredentialsAddressWithDelegates` credentials (CAP-71-01). The
++/// tracker that produced it has already rejected unsorted and duplicate
++/// addresses when the credentials were parsed, so every address here is
++/// unique.
++///
++/// For every delegate:
++/// - it must be a contract address. This prototype deliberately departs from
++///   the CAP-72 text, which also allows G-account delegates: a contract
++///   delegate displays as its existing C strkey everywhere, so no new strkey
++///   is needed, and a G-account co-signer is already expressible with plain
++///   ed25519 signers;
++/// - it must be stored on the `AccountEntry` as a `SignerKey::ScDelegated`
++///   signer with non-zero weight (the lookup never matches ed25519 signers or
++///   the master key);
++/// - `delegate_account_auth` must succeed for it. That runs the delegate's
++///   `__check_auth` with the same signature payload and context as the
++///   account itself, and any error propagates unchanged.
++///
++/// Delegated signers are only ever consulted here, for Soroban authorization
++/// entries. Classic transaction signatures are verified by stellar-core,
++/// which ignores `SignerKey::ScDelegated`.
++// metering: covered by the host and components
++#[cfg(feature = "next")]
++fn authenticate_delegated_signers(
++    host: &Host,
++    authorization_manager: &AuthorizationManager,
++    account: &AccountEntry,
++    delegated_signers: &HostVec,
++) -> Result<u32, HostError> {
++    let mut weight = 0u32;
++    for i in 0..delegated_signers.len()? {
++        let delegate: Address = delegated_signers.get(i)?;
++        let delegate_sc_address = delegate.to_sc_address()?;
++        if !matches!(delegate_sc_address, ScAddress::Contract(_)) {
++            return Err(err!(
++                host,
++                ContractError::AuthenticationError,
++                "delegated signer must be a contract address",
++                delegate
++            ));
++        }
++        let signer_weight =
++            host.get_delegated_signer_weight_from_account(&delegate_sc_address, account)?;
++        // 0 weight indicates that the delegated signer doesn't belong to this
++        // account. Like for ed25519 signatures, treat this as an error even if
++        // the other signers would have enough weight.
++        if signer_weight == 0 {
++            return Err(err!(
++                host,
++                ContractError::AuthenticationError,
++                "delegated signer does not belong to account",
++                delegate
++            ));
++        }
++        // This runs the delegate's authentication (`__check_auth` for a
++        // contract, `check_account_authentication` for a G-account) with the
++        // signature payload and context of the current authentication frame,
++        // and marks the delegate as used in the tracker.
++        authorization_manager.delegate_account_auth(host, delegate.as_object())?;
++        weight = weight.saturating_add(signer_weight as u32);
++    }
++    Ok(weight)
++}
++
++/// CAP-0072: G-accounts are authenticated against the `Med` threshold, unless
++/// the authorization context contains a contract call on a G-account (a call
++/// to the G-account contract, GAC, which manages the account's own signers
++/// and thresholds); then the `High` threshold is required, matching
++/// `SetOptionsOp`.
++///
++/// This prototype doesn't implement the GAC, so such a context can only come
++/// from a sub-invocation on a G-address in an authorization entry (the call
++/// itself can't be performed). The rule is kept because
++/// `check_account_authentication` refuses to count delegated signers toward
++/// `High` at all (see there), and that refusal must stay in place once the
++/// GAC exists.
++// metering: covered by the host and components
++#[cfg(feature = "next")]
++fn required_threshold_index(
++    host: &Host,
++    authorization_manager: &AuthorizationManager,
++) -> Result<ThresholdIndexes, HostError> {
++    let context: HostVec = authorization_manager
++        .get_context_for_current_auth_check(host)?
++        .try_into_val(host)?;
++    for i in 0..context.len()? {
++        let ctx: AuthorizationContext = context.get(i)?;
++        if let AuthorizationContext::Contract(contract_ctx) = ctx {
++            if matches!(
++                contract_ctx.contract.to_sc_address()?,
++                ScAddress::Account(_)
++            ) {
++                return Ok(ThresholdIndexes::High);
++            }
++        }
++    }
++    Ok(ThresholdIndexes::Med)
++}
++
+ // metering: covered
+ pub(crate) fn check_account_authentication(
+     host: &Host,
++    authorization_manager: &AuthorizationManager,
+     account_id: AccountId,
+     signature_payload: BytesObject,
+     signature: Val,
+ ) -> Result<(), HostError> {
+-    let signatures: HostVec = signature.try_into_val(host)?;
++    #[cfg(feature = "next")]
++    let delegated_signers_enabled = delegated_signers_enabled(host)?;
++    #[cfg(not(feature = "next"))]
++    let delegated_signers_enabled = false;
++    #[cfg(not(feature = "next"))]
++    let _ = authorization_manager;
++
++    // CAP-0072: the delegated signers provided for this account in its
++    // credentials. `None` when the credentials carry no delegate list or when
++    // CAP-0072 isn't active, in which case nothing below costs anything extra
++    // compared to the pre-CAP-0072 authentication.
++    #[cfg(feature = "next")]
++    let delegated_signers: Option<HostVec> = if delegated_signers_enabled
++        && authorization_manager.has_delegated_signers_for_current_auth_check(host)?
++    {
++        Some(
++            authorization_manager
++                .get_delegated_signers_for_current_auth_check(host)?
++                .try_into_val(host)?,
++        )
++    } else {
++        None
++    };
++    #[cfg(feature = "next")]
++    let delegates_len = match &delegated_signers {
++        Some(delegated_signers) => delegated_signers.len()?,
++        None => 0,
++    };
++    #[cfg(not(feature = "next"))]
++    let delegates_len = 0u32;
++
++    // CAP-0072: an account that authenticates with delegated signers only may
++    // pass `void` instead of an (empty) signature vector.
++    let signatures: HostVec = if delegated_signers_enabled && signature.is_void() {
++        HostVec::new(host)?
++    } else {
++        signature.try_into_val(host)?
++    };
+     // Check if there is too many signatures: there shouldn't be more
+-    // signatures than the amount of account signers.
++    // signatures (ed25519 signatures plus delegated signers) than the amount
++    // of account signers.
+     let len = signatures.len()?;
+-    if len > MAX_ACCOUNT_SIGNATURES {
++    let total_len = len.saturating_add(delegates_len);
++    if total_len > MAX_ACCOUNT_SIGNATURES {
+         return Err(err!(
+             host,
+             ContractError::AuthenticationError,
+             "too many account signers",
+-            len
++            total_len
+         ));
+     }
+-    if len == 0 {
++    if total_len == 0 {
+         return Err(host.error(
+             ContractError::AuthenticationError.into(),
+             "no account signatures found",
+@@ -198,8 +356,39 @@ pub(crate) fn check_account_authentication(
+         ));
+     }
+     let account = host.load_account(account_id)?;
+-    let mut prev_pk: Option<BytesN<32>> = None;
+     let mut weight = 0u32;
++    // CAP-0072: authenticate the delegated signers first and add up their
++    // weights. Any failure (unknown delegate, delegate's `__check_auth`
++    // failing) fails the whole authentication.
++    //
++    // Deliberate departure from the CAP-72 text: delegated signers count
++    // toward the `Med` threshold only, never toward `High`. When the context
++    // requires `High` (account management), delegated signers are refused
++    // outright instead of being ignored, so the failure is explicit. The
++    // account's own ed25519 keys thus keep sole control over its signers,
++    // thresholds and master weight, whatever weight a delegate was given.
++    // The threshold rule is only evaluated when delegates are present, so an
++    // account authenticated with ed25519 signatures alone is metered exactly
++    // as before.
++    #[cfg(feature = "next")]
++    if let Some(delegated_signers) = &delegated_signers {
++        if delegates_len > 0 {
++            if required_threshold_index(host, authorization_manager)? == ThresholdIndexes::High {
++                return Err(host.error(
++                    ContractError::AuthenticationError.into(),
++                    "delegated signers can't authorize account management (high threshold)",
++                    &[],
++                ));
++            }
++            weight = authenticate_delegated_signers(
++                host,
++                authorization_manager,
++                &account,
++                delegated_signers,
++            )?;
++        }
++    }
++    let mut prev_pk: Option<BytesN<32>> = None;
+     for i in 0..len {
+         let sig: AccountEd25519Signature = signatures.get(i)?;
+         // Cannot take multiple signatures from the same key
+diff --git a/soroban-env-host/src/host/data_helper.rs b/soroban-env-host/src/host/data_helper.rs
+index 0ac2d67..151afab 100644
+--- a/soroban-env-host/src/host/data_helper.rs
++++ b/soroban-env-host/src/host/data_helper.rs
+@@ -561,6 +561,41 @@ impl Host {
+         }
+     }
+ 
++    /// CAP-0072: returns the weight of the delegated signer `target_signer`
++    /// stored in `account`, or 0 if the account has no such signer.
++    ///
++    /// Only `SignerKey::ScDelegated` entries holding a contract address are
++    /// consulted: an ed25519 signer never matches a delegated signer lookup
++    /// and vice versa, and a delegated signer that holds a G-address (which
++    /// this prototype doesn't support, see `account_contract.rs`) is treated
++    /// as absent even if `SetOptionsOp` let it onto the account.
++    #[cfg(feature = "next")]
++    pub(crate) fn get_delegated_signer_weight_from_account(
++        &self,
++        target_signer: &ScAddress,
++        account: &AccountEntry,
++    ) -> Result<u8, HostError> {
++        let signers: &Vec<Signer> = account.signers.as_ref();
++        for signer in signers {
++            if let SignerKey::ScDelegated(this_signer @ ScAddress::Contract(_)) = &signer.key {
++                if target_signer == this_signer {
++                    // Clamp the weight at 255 for the same reason as in
++                    // `get_signer_weight_from_account`.
++                    let weight = min(signer.weight, u8::MAX as u32);
++                    return weight.try_into().map_err(|_| {
++                        self.err(
++                            ScErrorType::Auth,
++                            ScErrorCode::ArithDomain,
++                            "delegated signer weight does not fit in u8",
++                            &[U32Val::from(weight).to_val()],
++                        )
++                    });
++                }
++            }
++        }
++        Ok(0u8)
++    }
++
+     pub(crate) fn new_contract_data(
+         &self,
+         data: ContractDataEntry,
+diff --git a/soroban-env-host/src/host/metered_clone.rs b/soroban-env-host/src/host/metered_clone.rs
+index 9fd1fc2..ebe32a9 100644
+--- a/soroban-env-host/src/host/metered_clone.rs
++++ b/soroban-env-host/src/host/metered_clone.rs
+@@ -640,6 +640,9 @@ impl MeteredClone for Signer {
+         match &self.key {
+             Ed25519(_) | PreAuthTx(_) | HashX(_) => Ok(()),
+             Ed25519SignedPayload(p) => p.payload.charge_for_substructure(budget),
++            // CAP-0072: `ScAddress` is a shallow (fixed-size) type.
++            #[cfg(feature = "next")]
++            ScDelegated(_) => Ok(()),
+         }
+     }
+ }
+diff --git a/soroban-env-host/src/test.rs b/soroban-env-host/src/test.rs
+index 1651d24..28bf292 100644
+--- a/soroban-env-host/src/test.rs
++++ b/soroban-env-host/src/test.rs
+@@ -3,6 +3,8 @@ pub(crate) mod observe;
+ mod address;
+ mod auth;
+ mod auth_delegation;
++#[cfg(feature = "next")]
++mod account_delegated_signers;
+ mod basic;
+ mod bls12_381;
+ mod bn254;
+diff --git a/soroban-env-host/src/test/account_delegated_signers.rs b/soroban-env-host/src/test/account_delegated_signers.rs
+new file mode 100644
+index 0000000..98dd389
+--- /dev/null
++++ b/soroban-env-host/src/test/account_delegated_signers.rs
+@@ -0,0 +1,857 @@
++//! CAP-0072 prototype tests: delegated (contract) signers on G-accounts.
++//!
++//! The scenario mirrors the agent wallet demo: a plain G-account holds a
++//! Stellar asset balance, a custom account contract (`SIMPLE_ACCOUNT_CONTRACT`,
++//! which verifies an ed25519 signature over the payload) is added to the
++//! account as a `SignerKey::ScDelegated` signer via the `AccountEntry`, and
++//! the account authorizes a token `transfer` with a
++//! `SorobanCredentialsAddressWithDelegates` entry that carries the delegate's
++//! signature and no signature of its own.
++use ed25519_dalek::{Signer as _, SigningKey};
++use rand::{thread_rng, Rng};
++use soroban_test_wasms::SIMPLE_ACCOUNT_CONTRACT;
++
++use crate::builtin_contracts::base_types::{Address, BytesN};
++use crate::builtin_contracts::contract_error::ContractError;
++use crate::builtin_contracts::stellar_asset_contract::test_stellar_asset_contract::TestStellarAssetContract;
++use crate::builtin_contracts::testutils::{
++    account_to_address, generate_signing_key, new_ledger_entry_from_data,
++    sign_payload_for_account, signing_key_to_account_id, TestSigner,
++};
++use crate::xdr::{
++    AccountEntry, AccountEntryExt, AccountId, AlphaNum4, Asset, AssetCode4, HashIdPreimage,
++    Int128Parts, HashIdPreimageSorobanAuthorizationWithAddress, InvokeContractArgs,
++    LedgerEntryData, ScAddress, ScBytes, ScErrorCode, ScErrorType, ScVal, ScVec, SequenceNumber,
++    Signer, SignerKey, SorobanAddressCredentials, SorobanAddressCredentialsWithDelegates,
++    SorobanAuthorizationEntry, SorobanAuthorizedFunction, SorobanAuthorizedInvocation,
++    SorobanCredentials, SorobanDelegateSignature, Thresholds, TrustLineEntry, TrustLineEntryExt,
++    TrustLineFlags, Uint256,
++};
++use crate::{Env, Host, HostError, LedgerInfo, Symbol, TryFromVal, TryIntoVal, Val};
++
++fn i128_parts(v: i128) -> Int128Parts {
++    Int128Parts {
++        hi: (v >> 64) as i64,
++        lo: v as u64,
++    }
++}
++
++/// A delegate contract: `SIMPLE_ACCOUNT_CONTRACT` initialized with `key`'s
++/// public key. Its `__check_auth` takes a `BytesN<64>` signature and traps if
++/// it doesn't verify against the stored key.
++struct Delegate {
++    address: Address,
++    key: SigningKey,
++}
++
++impl Delegate {
++    fn sc_address(&self) -> ScAddress {
++        self.address.to_sc_address().unwrap()
++    }
++
++    fn sign(&self, payload: &[u8; 32]) -> ScVal {
++        ScVal::Bytes(ScBytes(
++            self.key.sign(payload).to_bytes().to_vec().try_into().unwrap(),
++        ))
++    }
++
++    fn sign_with(&self, key: &SigningKey, payload: &[u8; 32]) -> ScVal {
++        ScVal::Bytes(ScBytes(
++            key.sign(payload).to_bytes().to_vec().try_into().unwrap(),
++        ))
++    }
++}
++
++/// What the G-account puts in the auth entry.
++enum DelegateSig {
++    /// A correctly signed delegate entry.
++    Valid,
++    /// A delegate entry signed with a key the delegate doesn't know.
++    WrongKey(SigningKey),
++}
++
++struct Cap72Test {
++    host: Host,
++    issuer_key: SigningKey,
++    asset_code: [u8; 4],
++}
++
++impl Cap72Test {
++    fn setup() -> Self {
++        let host = Host::test_host_with_recording_footprint();
++        let protocol_version = host.get_ledger_protocol_version().unwrap();
++        host.set_ledger_info(LedgerInfo {
++            protocol_version,
++            sequence_number: 123,
++            timestamp: 123456,
++            network_id: [7; 32],
++            base_reserve: 5_000_000,
++            min_persistent_entry_ttl: 4096,
++            min_temp_entry_ttl: 16,
++            max_entry_ttl: 6_312_000,
++        })
++        .unwrap();
++        host.enable_debug().unwrap();
++        Self {
++            host: host.clone(),
++            issuer_key: generate_signing_key(&host),
++            asset_code: *b"USDC",
++        }
++    }
++
++    fn issuer_id(&self) -> AccountId {
++        signing_key_to_account_id(&self.issuer_key)
++    }
++
++    fn sac(&self) -> TestStellarAssetContract<'_> {
++        self.add_account(&self.issuer_id(), &[(&self.issuer_key, 1)], &[], [1, 0, 0, 0]);
++        let asset = Asset::CreditAlphanum4(AlphaNum4 {
++            asset_code: AssetCode4(self.asset_code),
++            issuer: self.issuer_id(),
++        });
++        TestStellarAssetContract::new_from_asset(&self.host, asset).unwrap()
++    }
++
++    /// Adds an `AccountEntry` with ed25519 signers and CAP-0072 delegated
++    /// signers. `thresholds` is `[master weight, low, med, high]`.
++    fn add_account(
++        &self,
++        account_id: &AccountId,
++        ed25519_signers: &[(&SigningKey, u32)],
++        delegated_signers: &[(ScAddress, u32)],
++        thresholds: [u8; 4],
++    ) {
++        let key = self.host.to_account_key(account_id.clone()).unwrap();
++        let mut signers = vec![];
++        for (signer, weight) in ed25519_signers {
++            signers.push(Signer {
++                key: SignerKey::Ed25519(Uint256(signer.verifying_key().to_bytes())),
++                weight: *weight,
++            });
++        }
++        for (address, weight) in delegated_signers {
++            signers.push(Signer {
++                key: SignerKey::ScDelegated(address.clone()),
++                weight: *weight,
++            });
++        }
++        let acc_entry = AccountEntry {
++            account_id: account_id.clone(),
++            balance: 100_000_000,
++            seq_num: SequenceNumber(0),
++            num_sub_entries: signers.len() as u32,
++            inflation_dest: None,
++            flags: 0,
++            home_domain: Default::default(),
++            thresholds: Thresholds(thresholds),
++            signers: signers.try_into().unwrap(),
++            ext: AccountEntryExt::V0,
++        };
++        self.host
++            .add_ledger_entry(
++                &key,
++                &new_ledger_entry_from_data(LedgerEntryData::Account(acc_entry)),
++                None,
++            )
++            .unwrap();
++    }
++
++    fn add_trustline(&self, account_id: &AccountId) {
++        let asset = self.host.create_tl_asset_4(self.asset_code, self.issuer_id());
++        let key = self
++            .host
++            .to_trustline_key(account_id.clone(), asset.clone())
++            .unwrap();
++        let trustline_entry = TrustLineEntry {
++            account_id: account_id.clone(),
++            asset,
++            balance: 0,
++            limit: i64::MAX,
++            flags: TrustLineFlags::AuthorizedFlag as u32,
++            ext: TrustLineEntryExt::V0,
++        };
++        self.host
++            .add_ledger_entry(
++                &key,
++                &new_ledger_entry_from_data(LedgerEntryData::Trustline(trustline_entry)),
++                None,
++            )
++            .unwrap();
++    }
++
++    fn deploy_delegate(&self) -> Delegate {
++        let key = generate_signing_key(&self.host);
++        let address_obj = self.host.register_test_contract_wasm(SIMPLE_ACCOUNT_CONTRACT);
++        let pk = BytesN::<32>::from_slice(&self.host, &key.verifying_key().to_bytes()).unwrap();
++        self.host
++            .call(
++                address_obj,
++                Symbol::try_from_val(&self.host, &"init").unwrap(),
++                test_vec![&self.host, pk].into(),
++            )
++            .unwrap();
++        Delegate {
++            address: Address::try_from_val(&self.host, &address_obj).unwrap(),
++            key,
++        }
++    }
++
++    fn signature_payload(
++        &self,
++        address: &ScAddress,
++        root_invocation: &SorobanAuthorizedInvocation,
++        nonce: i64,
++        signature_expiration_ledger: u32,
++    ) -> [u8; 32] {
++        let network_id = self
++            .host
++            .with_ledger_info(|li: &LedgerInfo| Ok(li.network_id))
++            .unwrap()
++            .try_into()
++            .unwrap();
++        self.host
++            .metered_hash_xdr(&HashIdPreimage::SorobanAuthorizationWithAddress(
++                HashIdPreimageSorobanAuthorizationWithAddress {
++                    network_id,
++                    invocation: root_invocation.clone(),
++                    address: address.clone(),
++                    nonce,
++                    signature_expiration_ledger,
++                },
++            ))
++            .unwrap()
++    }
++
++    /// Builds one `SorobanCredentialsAddressWithDelegates` auth entry for the
++    /// G-account `wallet` authorizing `fn_name(args)` on `contract`, with the
++    /// provided ed25519 signatures and delegate signatures.
++    #[allow(clippy::too_many_arguments)]
++    fn build_auth_entry(
++        &self,
++        wallet: &AccountId,
++        contract: &Address,
++        fn_name: &str,
++        args: Vec<ScVal>,
++        sub_invocations: Vec<SorobanAuthorizedInvocation>,
++        ed25519_signers: &[&SigningKey],
++        delegates: &[(&Delegate, DelegateSig)],
++        signature_is_void: bool,
++    ) -> SorobanAuthorizationEntry {
++        let root_invocation = SorobanAuthorizedInvocation {
++            function: SorobanAuthorizedFunction::ContractFn(InvokeContractArgs {
++                contract_address: contract.to_sc_address().unwrap(),
++                function_name: fn_name.try_into().unwrap(),
++                args: args.try_into().unwrap(),
++            }),
++            sub_invocations: sub_invocations.try_into().unwrap(),
++        };
++        let nonce: i64 = thread_rng().gen();
++        let signature_expiration_ledger = 1000;
++        let address = ScAddress::Account(wallet.clone());
++        let payload = self.signature_payload(
++            &address,
++            &root_invocation,
++            nonce,
++            signature_expiration_ledger,
++        );
++
++        let signature = if signature_is_void {
++            ScVal::Void
++        } else {
++            let mut keys: Vec<&SigningKey> = ed25519_signers.to_vec();
++            keys.sort_by_key(|k| *k.verifying_key().as_bytes());
++            let sigs: Vec<Val> = keys
++                .iter()
++                .map(|k| sign_payload_for_account(&self.host, k, &payload).try_into_val(&self.host).unwrap())
++                .collect();
++            ScVal::Vec(Some(ScVec(
++                self.host.vals_to_scval_vec(sigs.as_slice()).unwrap(),
++            )))
++        };
++
++        let mut delegate_sigs: Vec<SorobanDelegateSignature> = delegates
++            .iter()
++            .map(|(d, how)| SorobanDelegateSignature {
++                address: d.sc_address(),
++                signature: match how {
++                    DelegateSig::Valid => d.sign(&payload),
++                    DelegateSig::WrongKey(k) => d.sign_with(k, &payload),
++                },
++                nested_delegates: vec![].try_into().unwrap(),
++            })
++            .collect();
++        delegate_sigs.sort_by(|a, b| a.address.cmp(&b.address));
++
++        SorobanAuthorizationEntry {
++            credentials: SorobanCredentials::AddressWithDelegates(
++                SorobanAddressCredentialsWithDelegates {
++                    address_credentials: SorobanAddressCredentials {
++                        address,
++                        nonce,
++                        signature_expiration_ledger,
++                        signature,
++                    },
++                    delegates: delegate_sigs.try_into().unwrap(),
++                },
++            ),
++            root_invocation,
++        }
++    }
++
++    /// `transfer(wallet, to, amount)` on the SAC, authorized by `wallet` with
++    /// the given signers.
++    #[allow(clippy::too_many_arguments)]
++    fn transfer(
++        &self,
++        sac: &TestStellarAssetContract<'_>,
++        wallet: &AccountId,
++        to: &Address,
++        amount: i128,
++        ed25519_signers: &[&SigningKey],
++        delegates: &[(&Delegate, DelegateSig)],
++        signature_is_void: bool,
++    ) -> Result<Val, HostError> {
++        self.transfer_with_sub_invocations(
++            sac,
++            wallet,
++            to,
++            amount,
++            vec![],
++            ed25519_signers,
++            delegates,
++            signature_is_void,
++        )
++    }
++
++    #[allow(clippy::too_many_arguments)]
++    fn transfer_with_sub_invocations(
++        &self,
++        sac: &TestStellarAssetContract<'_>,
++        wallet: &AccountId,
++        to: &Address,
++        amount: i128,
++        sub_invocations: Vec<SorobanAuthorizedInvocation>,
++        ed25519_signers: &[&SigningKey],
++        delegates: &[(&Delegate, DelegateSig)],
++        signature_is_void: bool,
++    ) -> Result<Val, HostError> {
++        let wallet_address = account_to_address(&self.host, wallet.clone());
++        let args = vec![
++            ScVal::Address(ScAddress::Account(wallet.clone())),
++            ScVal::Address(to.to_sc_address().unwrap()),
++            ScVal::I128(i128_parts(amount)),
++        ];
++        let entry = self.build_auth_entry(
++            wallet,
++            &sac.address,
++            "transfer",
++            args,
++            sub_invocations,
++            ed25519_signers,
++            delegates,
++            signature_is_void,
++        );
++        self.host.set_authorization_entries(vec![entry])?;
++        self.host.call(
++            sac.address.as_object(),
++            Symbol::try_from_val(&self.host, &"transfer").unwrap(),
++            test_vec![&self.host, wallet_address, to.clone(), amount].into(),
++        )
++    }
++}
++
++/// The wallet from the demo: master weight 2, one delegated signer of weight
++/// 1, thresholds low 1, med 1, high 2.
++struct Wallet {
++    id: AccountId,
++    address: Address,
++    key: SigningKey,
++}
++
++fn setup_demo_wallet(test: &Cap72Test, delegate: &Delegate) -> Wallet {
++    let key = generate_signing_key(&test.host);
++    let id = signing_key_to_account_id(&key);
++    test.add_account(&id, &[], &[(delegate.sc_address(), 1)], [2, 1, 1, 2]);
++    test.add_trustline(&id);
++    Wallet {
++        address: account_to_address(&test.host, id.clone()),
++        id,
++        key,
++    }
++}
++
++fn setup_seller(test: &Cap72Test) -> Address {
++    let key = generate_signing_key(&test.host);
++    let id = signing_key_to_account_id(&key);
++    test.add_account(&id, &[], &[], [1, 0, 0, 0]);
++    test.add_trustline(&id);
++    account_to_address(&test.host, id)
++}
++
++fn assert_auth_error(res: &Result<Val, HostError>) {
++    let err = res.as_ref().err().expect("expected an error");
++    assert!(
++        err.error.is_type(ScErrorType::Contract)
++            && err.error.get_code() == ContractError::AuthenticationError as u32
++            || err.error.is_type(ScErrorType::Auth),
++        "unexpected error: {:?}",
++        err
++    );
++}
++
++#[test]
++fn test_delegated_contract_signer_authorizes_transfer() {
++    let test = Cap72Test::setup();
++    let sac = test.sac();
++    let delegate = test.deploy_delegate();
++    let wallet = setup_demo_wallet(&test, &delegate);
++    let seller = setup_seller(&test);
++    let issuer = TestSigner::account(&test.issuer_key);
++    sac.mint(&issuer, wallet.address.clone(), 10_000_000).unwrap();
++
++    // The delegate alone (void top-level signature) reaches the med threshold.
++    test.transfer(
++        &sac,
++        &wallet.id,
++        &seller,
++        1_000_000,
++        &[],
++        &[(&delegate, DelegateSig::Valid)],
++        true,
++    )
++    .unwrap();
++    assert_eq!(sac.balance(wallet.address.clone()).unwrap(), 9_000_000);
++    assert_eq!(sac.balance(seller.clone()).unwrap(), 1_000_000);
++
++    // An empty signature vector works the same as void.
++    test.transfer(
++        &sac,
++        &wallet.id,
++        &seller,
++        1_000_000,
++        &[],
++        &[(&delegate, DelegateSig::Valid)],
++        false,
++    )
++    .unwrap();
++    assert_eq!(sac.balance(wallet.address.clone()).unwrap(), 8_000_000);
++
++    // The agent key behind the delegate is not an ed25519 signer on the
++    // account, so a plain account signature from it is rejected.
++    let res = test.transfer(
++        &sac,
++        &wallet.id,
++        &seller,
++        1_000_000,
++        &[&delegate.key],
++        &[],
++        false,
++    );
++    assert_auth_error(&res);
++    assert_eq!(sac.balance(wallet.address.clone()).unwrap(), 8_000_000);
++}
++
++#[test]
++fn test_delegate_rejection_propagates() {
++    let test = Cap72Test::setup();
++    let sac = test.sac();
++    let delegate = test.deploy_delegate();
++    let wallet = setup_demo_wallet(&test, &delegate);
++    let seller = setup_seller(&test);
++    let issuer = TestSigner::account(&test.issuer_key);
++    sac.mint(&issuer, wallet.address.clone(), 10_000_000).unwrap();
++
++    // The delegate's `__check_auth` traps on a signature from the wrong key
++    // (ed25519 verification failure) and the transfer fails.
++    let wrong_key = generate_signing_key(&test.host);
++    let res = test.transfer(
++        &sac,
++        &wallet.id,
++        &seller,
++        1_000_000,
++        &[],
++        &[(&delegate, DelegateSig::WrongKey(wrong_key))],
++        true,
++    );
++    // The host wraps every failed account authentication into
++    // `Error(Auth, InvalidAction)` (see `maybe_authorize_invocation`); the
++    // delegate's own `Error(Crypto, InvalidInput)` is reported in the
++    // "failed account authentication with error" diagnostic event.
++    let err = res.err().unwrap();
++    assert!(
++        err.error.is_type(ScErrorType::Auth) && err.error.is_code(ScErrorCode::InvalidAction),
++        "unexpected error: {:?}",
++        err
++    );
++    assert_eq!(sac.balance(wallet.address.clone()).unwrap(), 10_000_000);
++    assert_eq!(sac.balance(seller.clone()).unwrap(), 0);
++
++    // A delegates-only entry that lists no delegate at all has nothing to
++    // authenticate with.
++    let res = test.transfer(&sac, &wallet.id, &seller, 1_000_000, &[], &[], true);
++    assert_auth_error(&res);
++}
++
++#[test]
++fn test_contract_that_is_not_a_signer_is_rejected() {
++    let test = Cap72Test::setup();
++    let sac = test.sac();
++    let delegate = test.deploy_delegate();
++    let stranger = test.deploy_delegate();
++    let wallet = setup_demo_wallet(&test, &delegate);
++    let seller = setup_seller(&test);
++    let issuer = TestSigner::account(&test.issuer_key);
++    sac.mint(&issuer, wallet.address.clone(), 10_000_000).unwrap();
++
++    // `stranger` is a perfectly valid custom account, but it's not on the
++    // account's signer list.
++    let res = test.transfer(
++        &sac,
++        &wallet.id,
++        &seller,
++        1_000_000,
++        &[],
++        &[(&stranger, DelegateSig::Valid)],
++        true,
++    );
++    assert_auth_error(&res);
++    // Even next to a valid delegate, an unknown delegate fails the whole
++    // authentication.
++    let res = test.transfer(
++        &sac,
++        &wallet.id,
++        &seller,
++        1_000_000,
++        &[],
++        &[
++            (&delegate, DelegateSig::Valid),
++            (&stranger, DelegateSig::Valid),
++        ],
++        true,
++    );
++    assert_auth_error(&res);
++    assert_eq!(sac.balance(wallet.address.clone()).unwrap(), 10_000_000);
++}
++
++#[test]
++fn test_delegate_weight_below_threshold_is_rejected() {
++    let test = Cap72Test::setup();
++    let sac = test.sac();
++    let delegate = test.deploy_delegate();
++    let delegate_2 = test.deploy_delegate();
++    let seller = setup_seller(&test);
++    let issuer = TestSigner::account(&test.issuer_key);
++
++    // med threshold 2, delegate weight 1, plus an ed25519 co-signer of weight 1.
++    let cosigner = generate_signing_key(&test.host);
++    let wallet_key = generate_signing_key(&test.host);
++    let wallet_id = signing_key_to_account_id(&wallet_key);
++    test.add_account(
++        &wallet_id,
++        &[(&cosigner, 1)],
++        &[(delegate.sc_address(), 1), (delegate_2.sc_address(), 1)],
++        [3, 1, 2, 3],
++    );
++    test.add_trustline(&wallet_id);
++    let wallet_address = account_to_address(&test.host, wallet_id.clone());
++    sac.mint(&issuer, wallet_address.clone(), 10_000_000).unwrap();
++
++    // One delegate: weight 1 < 2.
++    let res = test.transfer(
++        &sac,
++        &wallet_id,
++        &seller,
++        1_000_000,
++        &[],
++        &[(&delegate, DelegateSig::Valid)],
++        true,
++    );
++    assert_auth_error(&res);
++    assert_eq!(sac.balance(wallet_address.clone()).unwrap(), 10_000_000);
++
++    // Delegate + ed25519 co-signer: 1 + 1 = 2.
++    test.transfer(
++        &sac,
++        &wallet_id,
++        &seller,
++        1_000_000,
++        &[&cosigner],
++        &[(&delegate, DelegateSig::Valid)],
++        false,
++    )
++    .unwrap();
++    assert_eq!(sac.balance(wallet_address.clone()).unwrap(), 9_000_000);
++
++    // Two delegates: 1 + 1 = 2.
++    test.transfer(
++        &sac,
++        &wallet_id,
++        &seller,
++        1_000_000,
++        &[],
++        &[
++            (&delegate, DelegateSig::Valid),
++            (&delegate_2, DelegateSig::Valid),
++        ],
++        true,
++    )
++    .unwrap();
++    assert_eq!(sac.balance(wallet_address.clone()).unwrap(), 8_000_000);
++
++    // Two delegates where one fails: the whole authentication fails.
++    let wrong_key = generate_signing_key(&test.host);
++    let res = test.transfer(
++        &sac,
++        &wallet_id,
++        &seller,
++        1_000_000,
++        &[],
++        &[
++            (&delegate, DelegateSig::Valid),
++            (&delegate_2, DelegateSig::WrongKey(wrong_key)),
++        ],
++        true,
++    );
++    assert!(res.is_err());
++    assert_eq!(sac.balance(wallet_address.clone()).unwrap(), 8_000_000);
++}
++
++#[test]
++fn test_plain_ed25519_account_is_unchanged() {
++    let test = Cap72Test::setup();
++    let sac = test.sac();
++    let delegate = test.deploy_delegate();
++    let wallet = setup_demo_wallet(&test, &delegate);
++    let seller = setup_seller(&test);
++    let issuer = TestSigner::account(&test.issuer_key);
++    sac.mint(&issuer, wallet.address.clone(), 10_000_000).unwrap();
++
++    // The master key still works through the regular `SorobanCredentials::Address`
++    // path (the stock test client), even though a delegated signer is on the
++    // account.
++    sac.transfer(&TestSigner::account(&wallet.key), seller.clone(), 1_000_000)
++        .unwrap();
++    assert_eq!(sac.balance(wallet.address.clone()).unwrap(), 9_000_000);
++
++    // And through `AddressWithDelegates` credentials with an empty delegate
++    // list.
++    test.transfer(
++        &sac,
++        &wallet.id,
++        &seller,
++        1_000_000,
++        &[&wallet.key],
++        &[],
++        false,
++    )
++    .unwrap();
++    assert_eq!(sac.balance(wallet.address.clone()).unwrap(), 8_000_000);
++
++    // A void signature without delegates is still "no account signatures".
++    let res = test.transfer(&sac, &wallet.id, &seller, 1_000_000, &[], &[], true);
++    assert_auth_error(&res);
++
++    // An account without any delegated signers behaves as before.
++    let plain_key = generate_signing_key(&test.host);
++    let plain_id = signing_key_to_account_id(&plain_key);
++    test.add_account(&plain_id, &[], &[], [1, 0, 0, 0]);
++    test.add_trustline(&plain_id);
++    let plain_address = account_to_address(&test.host, plain_id.clone());
++    sac.mint(&issuer, plain_address.clone(), 5_000_000).unwrap();
++    sac.transfer(&TestSigner::account(&plain_key), seller.clone(), 1_000_000)
++        .unwrap();
++    assert_eq!(sac.balance(plain_address.clone()).unwrap(), 4_000_000);
++    // A delegate that the plain account never added is rejected.
++    let res = test.transfer(
++        &sac,
++        &plain_id,
++        &seller,
++        1_000_000,
++        &[],
++        &[(&delegate, DelegateSig::Valid)],
++        true,
++    );
++    assert_auth_error(&res);
++    assert_eq!(sac.balance(plain_address.clone()).unwrap(), 4_000_000);
++}
++
++#[test]
++fn test_g_account_delegated_signer_is_rejected() {
++    // Deliberate departure from the CAP-72 text: only contracts can be
++    // delegated signers. A `SignerKey::ScDelegated` holding a G-address is
++    // ignored on the account, and a G-address delegate in the credentials is
++    // refused.
++    let test = Cap72Test::setup();
++    let sac = test.sac();
++    let seller = setup_seller(&test);
++    let issuer = TestSigner::account(&test.issuer_key);
++
++    // A G-account "delegate" with a single signer.
++    let cosigner_key = generate_signing_key(&test.host);
++    let cosigner_id = signing_key_to_account_id(&cosigner_key);
++    test.add_account(&cosigner_id, &[], &[], [1, 0, 0, 0]);
++
++    let wallet_key = generate_signing_key(&test.host);
++    let wallet_id = signing_key_to_account_id(&wallet_key);
++    test.add_account(
++        &wallet_id,
++        &[],
++        &[(ScAddress::Account(cosigner_id.clone()), 1)],
++        [2, 1, 1, 2],
++    );
++    test.add_trustline(&wallet_id);
++    let wallet_address = account_to_address(&test.host, wallet_id.clone());
++    sac.mint(&issuer, wallet_address.clone(), 10_000_000).unwrap();
++
++    // Build the entry by hand: the delegate is the G-account, signed with its
++    // own key the way CAP-71-01 built-in delegation would expect.
++    let args = vec![
++        ScVal::Address(ScAddress::Account(wallet_id.clone())),
++        ScVal::Address(seller.to_sc_address().unwrap()),
++        ScVal::I128(i128_parts(1_000_000)),
++    ];
++    let root_invocation = SorobanAuthorizedInvocation {
++        function: SorobanAuthorizedFunction::ContractFn(InvokeContractArgs {
++            contract_address: sac.address.to_sc_address().unwrap(),
++            function_name: "transfer".try_into().unwrap(),
++            args: args.try_into().unwrap(),
++        }),
++        sub_invocations: Default::default(),
++    };
++    let nonce: i64 = thread_rng().gen();
++    let address = ScAddress::Account(wallet_id.clone());
++    let payload = test.signature_payload(&address, &root_invocation, nonce, 1000);
++    let cosigner_sig = TestSigner::account(&cosigner_key).sign(&test.host, &payload);
++    let entry = SorobanAuthorizationEntry {
++        credentials: SorobanCredentials::AddressWithDelegates(
++            SorobanAddressCredentialsWithDelegates {
++                address_credentials: SorobanAddressCredentials {
++                    address,
++                    nonce,
++                    signature_expiration_ledger: 1000,
++                    signature: ScVal::Void,
++                },
++                delegates: vec![SorobanDelegateSignature {
++                    address: ScAddress::Account(cosigner_id.clone()),
++                    signature: cosigner_sig,
++                    nested_delegates: vec![].try_into().unwrap(),
++                }]
++                .try_into()
++                .unwrap(),
++            },
++        ),
++        root_invocation,
++    };
++    test.host.set_authorization_entries(vec![entry]).unwrap();
++    let res = test.host.call(
++        sac.address.as_object(),
++        Symbol::try_from_val(&test.host, &"transfer").unwrap(),
++        test_vec![&test.host, wallet_address.clone(), seller.clone(), 1_000_000i128].into(),
++    );
++    assert_auth_error(&res);
++    assert_eq!(sac.balance(wallet_address.clone()).unwrap(), 10_000_000);
++
++    // The master key is unaffected.
++    sac.transfer(&TestSigner::account(&wallet_key), seller.clone(), 1_000_000)
++        .unwrap();
++    assert_eq!(sac.balance(wallet_address.clone()).unwrap(), 9_000_000);
++}
++
++#[test]
++fn test_delegated_signers_never_count_toward_high_threshold() {
++    // Deliberate departure from the CAP-72 text: a delegated signer's weight
++    // counts toward the med threshold only. When the authorization context
++    // contains a call on the G-account itself (an account-management call,
++    // which requires the high threshold), delegated signers are refused, even
++    // with weight 255.
++    let test = Cap72Test::setup();
++    let sac = test.sac();
++    let delegate = test.deploy_delegate();
++    let seller = setup_seller(&test);
++    let issuer = TestSigner::account(&test.issuer_key);
++
++    let wallet_key = generate_signing_key(&test.host);
++    let wallet_id = signing_key_to_account_id(&wallet_key);
++    // Master weight 1, delegate weight 255, thresholds 1/1/1: the delegate
++    // would trivially pass any threshold by weight alone.
++    test.add_account(&wallet_id, &[], &[(delegate.sc_address(), 255)], [1, 1, 1, 1]);
++    test.add_trustline(&wallet_id);
++    let wallet_address = account_to_address(&test.host, wallet_id.clone());
++    sac.mint(&issuer, wallet_address.clone(), 10_000_000).unwrap();
++
++    // Sanity check: without an account call in the context the delegate
++    // authorizes the transfer.
++    test.transfer(
++        &sac,
++        &wallet_id,
++        &seller,
++        1_000_000,
++        &[],
++        &[(&delegate, DelegateSig::Valid)],
++        true,
++    )
++    .unwrap();
++    assert_eq!(sac.balance(wallet_address.clone()).unwrap(), 9_000_000);
++
++    // A sub-invocation on the G-account itself (what a GAC call would look
++    // like) puts an account call into the context.
++    let account_call = SorobanAuthorizedInvocation {
++        function: SorobanAuthorizedFunction::ContractFn(InvokeContractArgs {
++            contract_address: ScAddress::Account(wallet_id.clone()),
++            function_name: "set_master_weight".try_into().unwrap(),
++            args: vec![ScVal::U32(0)].try_into().unwrap(),
++        }),
++        sub_invocations: Default::default(),
++    };
++    let res = test.transfer_with_sub_invocations(
++        &sac,
++        &wallet_id,
++        &seller,
++        1_000_000,
++        vec![account_call.clone()],
++        &[],
++        &[(&delegate, DelegateSig::Valid)],
++        true,
++    );
++    assert_auth_error(&res);
++    // Mixed credentials are refused too: the delegate must not be listed at
++    // all for a high-threshold context.
++    let res = test.transfer_with_sub_invocations(
++        &sac,
++        &wallet_id,
++        &seller,
++        1_000_000,
++        vec![account_call.clone()],
++        &[&wallet_key],
++        &[(&delegate, DelegateSig::Valid)],
++        false,
++    );
++    assert_auth_error(&res);
++    assert_eq!(sac.balance(wallet_address.clone()).unwrap(), 9_000_000);
++
++    // The master key alone passes the high threshold (the unused
++    // sub-invocation doesn't matter for authentication itself).
++    let res = test.transfer_with_sub_invocations(
++        &sac,
++        &wallet_id,
++        &seller,
++        1_000_000,
++        vec![account_call.clone()],
++        &[&wallet_key],
++        &[],
++        false,
++    );
++    if let Err(e) = &res {
++        // If the host rejects the entry for reasons other than
++        // authentication (e.g. an unconsumed sub-invocation), that is not what
++        // this test is about; it must not be an authentication error though.
++        assert!(
++            !(e.error.is_type(ScErrorType::Contract)
++                && e.error.get_code() == ContractError::AuthenticationError as u32),
++            "unexpected authentication error: {:?}",
++            e
++        );
++    } else {
++        assert_eq!(sac.balance(wallet_address.clone()).unwrap(), 8_000_000);
++    }
++}
