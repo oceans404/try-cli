@@ -22,6 +22,7 @@ rules guard a normal account.
 
 | Piece | File | Role |
 | --- | --- | --- |
+| Wallet contract (B+) | `contracts/agent_wallet/src/lib.rs` | Smart account standing in for a CAP-72a G-account: holds the USDC, lists delegated signers with weights (owner-managed, like `SetOptionsOp`), and forwards every authorization to them with CAP-71-01's `delegate_auth`. Refuses delegated auth for calls on itself, and non-contract signers |
 | Policy contract | `contracts/agent_policy/src/lib.rs` | Soroban custom account. Holds the rules, checks the agent's signature, checks every payment, tracks the day's spending. Owner-only `update_rules` and `withdraw` |
 | Seller (x3) | `../server.js` | True Prices, an x402 API: `GET /price-check?item=…` for $1. The demo runs it three times (below) |
 | Facilitator | `facilitator.mjs` | Verifies and settles x402 payments. Stock `ExactStellarScheme` from `@x402/stellar` with stock settings, plus a `GET /log` of verify results |
@@ -190,22 +191,27 @@ persistent storage, and a new persistent entry pays rent for the network's long
 minimum TTL: the first payment of each day cost 409,731 stroops against 11,840
 for the next one. With temporary storage the first payment costs 26,328.
 
-## Version B and version A side by side
+## Versions B, B+ and A side by side
 
-| | Version B (testnet, built) | Version A (local CAP-72 network) |
-| --- | --- | --- |
-| The wallet | `agent_policy` itself, a C-address holding the USDC | A plain G-account holding the USDC |
-| `agent_policy`'s role | The account | A delegated signer on the G-account |
-| `wallet` in the contract | Not set (the contract's own address) | The G-account |
-| Funding (step 1) | Classic Payment fails, funder uses the token `transfer` instead | A classic Payment, like any exchange sends |
-| Attaching the policy (step 2) | Deploying it is attaching it | `SetOptionsOp` adds `agent_policy` as a signer (weight 1, master weight 2, thresholds 1/1/2) |
-| Auth entry credentials | `SorobanCredentialsAddress` for the C-address, `AgentSignature` as the signature | `SorobanCredentialsAddressWithDelegates` for the G-address: void top-level signature, one delegate `{ agent_policy, AgentSignature }` |
-| Who runs `__check_auth` | The host, because the C-address is a custom account | The host, through CAP-71-01's delegation, after checking `agent_policy` is a delegated signer on the account |
-| Facilitator | Ported scheme, stock settings | Same; the port already accepts the delegated credential type |
-| Network | Testnet through RPC | A `stellar/quickstart` image built from patched core, host and RPC |
-| Explorer links | stellar.expert | None. The runner prints results from RPC `getTransaction` |
+| | Version B (testnet, built) | Version B+ (testnet, built) | Version A (local CAP-72 network) |
+| --- | --- | --- | --- |
+| The wallet | `agent_policy` itself, a C-address holding the USDC | `agent_wallet`, a C-address holding the USDC | A plain G-account holding the USDC |
+| `agent_policy`'s role | The account | A delegated signer of `agent_wallet` | A delegated signer on the G-account |
+| `wallet` in the contract | Not set (the contract's own address) | `agent_wallet` | The G-account |
+| Funding (step 1) | Classic Payment fails, funder uses the token `transfer` instead | Same as B | A classic Payment, like any exchange sends |
+| Attaching the policy (step 2) | Deploying it is attaching it | Owner calls `agent_wallet.set_signer(policy, 1)` | `SetOptionsOp` adds `agent_policy` as a signer (weight 1, master weight 2, thresholds 1/1/2) |
+| Auth entry credentials | `SorobanCredentialsAddress` for the C-address, `AgentSignature` as the signature | `SorobanCredentialsAddressWithDelegates` for `agent_wallet`: void top-level signature, one delegate `{ agent_policy, AgentSignature }` | The same, for the G-address |
+| Who runs `agent_policy`'s `__check_auth` | The host, because the C-address is a custom account | `agent_wallet`'s `__check_auth`, through CAP-71-01's `delegate_auth` | The host itself, through CAP-71-01's delegation, after checking `agent_policy` is a delegated signer on the account |
+| Facilitator | Ported scheme, stock settings | Same; uses the port's delegated-credential support | Same |
+| Network | Testnet through RPC | Testnet through RPC | A `stellar/quickstart` image built from patched core, host and RPC |
+| Explorer links | stellar.expert | stellar.expert | None. The runner prints results from RPC `getTransaction` |
 
-The policy contract is the same in both. CAP-71-01 says a delegate's
+B+ and A differ in one place: who calls the delegate. In B+ a contract
+(`agent_wallet`) does it; under CAP-72 the host does it for a G-account. The
+credentials, the delegate, the payload and the contexts are the same, so B+
+exercises everything in CAP-72 except the G-account signer itself.
+
+The policy contract is the same in all three. CAP-71-01 says a delegate's
 `__check_auth` receives the same payload and contexts as the account itself, so
 the checks don't change; only `wallet` does.
 

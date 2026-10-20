@@ -1,6 +1,6 @@
-import { nativeToScVal, contract } from "@stellar/stellar-sdk";
+import { nativeToScVal, contract, Address, Operation } from "@stellar/stellar-sdk";
 import { findDefaultAsset } from "../../defaultAssets";
-import { handleSimulationResult } from "../../shared";
+import { getAddressCredentials, handleSimulationResult, isAuthEntrySigned } from "../../shared";
 import {
   getEstimatedLedgerCloseTimeSeconds,
   getNetworkPassphrase,
@@ -111,7 +111,12 @@ export class ExactStellarScheme implements SchemeNetworkClient {
     await tx.simulate();
     handleSimulationResult(tx.simulation);
 
-    missingSigners = tx.needsNonInvokerSigningBy();
+    // Not tx.needsNonInvokerSigningBy(): the sdk counts an entry with a void
+    // top-level signature as unsigned even when it carries signed delegates
+    // (CAP-71-01), which is how a delegating account authorizes.
+    missingSigners = tx
+      .needsNonInvokerSigningBy()
+      .filter(address => !signedThroughDelegates(tx.built?.operations?.[0], address));
     if (missingSigners.length > 0) {
       throw new Error(`unexpected signer(s) required: [${missingSigners.join(", ")}]`);
     }
@@ -152,4 +157,23 @@ export class ExactStellarScheme implements SchemeNetworkClient {
       throw new Error(`Invalid Stellar asset address: ${asset}`);
     }
   }
+}
+
+/**
+ * Whether every auth entry for `address` in an invokeHostFunction operation is
+ * signed, counting an entry with a void top-level signature and signed
+ * delegates (CAP-71-01) as signed.
+ *
+ * @param op - The transaction's operation, if any
+ * @param address - The address the sdk reported as still needing a signature
+ * @returns `true` if the address's entries are all signed through delegates
+ */
+function signedThroughDelegates(op: unknown, address: string): boolean {
+  const invoke = op as Operation.InvokeHostFunction | undefined;
+  const auth = invoke?.type === "invokeHostFunction" ? (invoke.auth ?? []) : [];
+  const mine = auth.filter(entry => {
+    const creds = getAddressCredentials(entry.credentials);
+    return creds !== undefined && Address.fromScAddress(creds.address).toString() === address;
+  });
+  return mine.length > 0 && mine.every(entry => isAuthEntrySigned(entry.credentials));
 }

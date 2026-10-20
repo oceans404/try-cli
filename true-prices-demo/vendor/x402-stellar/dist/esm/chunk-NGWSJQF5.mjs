@@ -1,9 +1,11 @@
 import {
+  getAddressCredentials,
   getEstimatedLedgerCloseTimeSeconds,
   getNetworkPassphrase,
   getRpcClient,
   getRpcUrl,
   handleSimulationResult,
+  isAuthEntrySigned,
   isStellarNetwork,
   validateStellarAssetAddress,
   validateStellarDestinationAddress
@@ -13,7 +15,7 @@ import {
 } from "./chunk-2G7L7YFT.mjs";
 
 // src/exact/client/scheme.ts
-import { nativeToScVal, contract } from "@stellar/stellar-sdk";
+import { nativeToScVal, contract, Address } from "@stellar/stellar-sdk";
 var ExactStellarScheme = class {
   /**
    * Creates a new ExactStellarScheme instance.
@@ -92,7 +94,7 @@ var ExactStellarScheme = class {
     }
     await tx.simulate();
     handleSimulationResult(tx.simulation);
-    missingSigners = tx.needsNonInvokerSigningBy();
+    missingSigners = tx.needsNonInvokerSigningBy().filter((address) => !signedThroughDelegates(tx.built?.operations?.[0], address));
     if (missingSigners.length > 0) {
       throw new Error(`unexpected signer(s) required: [${missingSigners.join(", ")}]`);
     }
@@ -128,8 +130,17 @@ var ExactStellarScheme = class {
     }
   }
 };
+function signedThroughDelegates(op, address) {
+  const invoke = op;
+  const auth = invoke?.type === "invokeHostFunction" ? invoke.auth ?? [] : [];
+  const mine = auth.filter((entry) => {
+    const creds = getAddressCredentials(entry.credentials);
+    return creds !== void 0 && Address.fromScAddress(creds.address).toString() === address;
+  });
+  return mine.length > 0 && mine.every((entry) => isAuthEntrySigned(entry.credentials));
+}
 
 export {
   ExactStellarScheme
 };
-//# sourceMappingURL=chunk-PB7EOGDZ.mjs.map
+//# sourceMappingURL=chunk-NGWSJQF5.mjs.map

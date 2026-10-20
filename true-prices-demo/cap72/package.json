@@ -7,7 +7,7 @@
     "facilitator": "NODE_USE_ENV_PROXY=1 node --disable-warning=UNDICI-EHPA facilitator.mjs",
     "buy:agent": "NODE_USE_ENV_PROXY=1 node --disable-warning=UNDICI-EHPA buy-agent.mjs",
     "direct-submit": "NODE_USE_ENV_PROXY=1 node --disable-warning=UNDICI-EHPA direct-submit.mjs",
-    "test:contract": "cd contracts/agent_policy && cargo test"
+    "test:contract": "cd contracts/agent_policy && cargo test && cd ../agent_wallet && cargo test"
   },
   "type": "module",
   "private": true,

@@ -77,6 +77,43 @@ function handleSimulationResult(simulation) {
     throw new Error(msg);
   }
 }
+function getAddressCredentials(credentials) {
+  switch (credentials.type) {
+    case "sorobanCredentialsAddress":
+      return credentials.address;
+    case "sorobanCredentialsAddressV2":
+      return credentials.addressV2;
+    case "sorobanCredentialsAddressWithDelegates":
+      return credentials.addressWithDelegates.addressCredentials;
+    default:
+      return void 0;
+  }
+}
+function getDelegateSignatures(credentials) {
+  if (credentials.type === "sorobanCredentialsAddressWithDelegates") {
+    return credentials.addressWithDelegates.delegates;
+  }
+  return [];
+}
+function isSignaturePresent(signature) {
+  return signature.type !== "scvVoid";
+}
+function areAllDelegatesSigned(delegates) {
+  return delegates.every(
+    (delegate) => isSignaturePresent(delegate.signature) && areAllDelegatesSigned(delegate.nestedDelegates)
+  );
+}
+function isAuthEntrySigned(credentials) {
+  const addressCredentials = getAddressCredentials(credentials);
+  if (!addressCredentials) {
+    return false;
+  }
+  if (isSignaturePresent(addressCredentials.signature)) {
+    return true;
+  }
+  const delegates = getDelegateSignatures(credentials);
+  return delegates.length > 0 && areAllDelegatesSigned(delegates);
+}
 
 // src/utils.ts
 var import_stellar_sdk2 = require("@stellar/stellar-sdk");
@@ -226,7 +263,7 @@ var ExactStellarScheme = class {
     }
     await tx.simulate();
     handleSimulationResult(tx.simulation);
-    missingSigners = tx.needsNonInvokerSigningBy();
+    missingSigners = tx.needsNonInvokerSigningBy().filter((address) => !signedThroughDelegates(tx.built?.operations?.[0], address));
     if (missingSigners.length > 0) {
       throw new Error(`unexpected signer(s) required: [${missingSigners.join(", ")}]`);
     }
@@ -262,6 +299,15 @@ var ExactStellarScheme = class {
     }
   }
 };
+function signedThroughDelegates(op, address) {
+  const invoke = op;
+  const auth = invoke?.type === "invokeHostFunction" ? invoke.auth ?? [] : [];
+  const mine = auth.filter((entry) => {
+    const creds = getAddressCredentials(entry.credentials);
+    return creds !== void 0 && import_stellar_sdk3.Address.fromScAddress(creds.address).toString() === address;
+  });
+  return mine.length > 0 && mine.every((entry) => isAuthEntrySigned(entry.credentials));
+}
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   ExactStellarScheme

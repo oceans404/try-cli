@@ -5,17 +5,23 @@ $2 a day, one allowed seller) are enforced by the network, not by the agent's
 code. A buggy or prompt-injected agent can try whatever it likes; the policy
 contract says no.
 
-This folder is the working **version B**: it runs today on Stellar testnet, with
-the wallet as a smart account (a C-address). **Version A** is the same demo on a
-local network patched with [CAP-72](https://github.com/stellar/stellar-protocol/blob/master/core/cap-0072.md),
-where the wallet is a plain G-account that any exchange can fund. Its host patch
+Three versions, from what runs today to what CAP-72 would add:
+
+| Version | Wallet | Runs | What it shows |
+| --- | --- | --- | --- |
+| **B** | `agent_policy` itself, a smart account | testnet | Onchain spending rules a misbehaving agent can't get around |
+| **B+** | `agent_wallet`, a smart account that delegates to `agent_policy` through CAP-71-01 | testnet | The same, through the exact delegation mechanism and credential type CAP-72 reuses |
+| **A** | a plain G-account with `agent_policy` as a delegated signer ([CAP-72](https://github.com/stellar/stellar-protocol/blob/master/core/cap-0072.md)) | local network, not built yet | What CAP-72 adds: an exchange funds the wallet with a classic payment |
+
+B+ is the one to present. The only thing it can't show is the step CAP-72
+itself adds: a G-account taking the contract as a signer. Version A's host patch
 and the plan for the rest are in [`version-a/`](version-a/).
 
 | Read | For |
 | --- | --- |
-| [The slides](https://claude.ai/artifact/6HJq4iDijBRNoxR5Cwqqp2) | 12 slides: what we built, what it showed, CAP-72a, next steps (private until shared) |
+| [The slides](https://claude.ai/artifact/6HJq4iDijBRNoxR5Cwqqp2) | The deck: what we built, what it showed, why CAP-72 stalled, next steps (private until shared) |
 | This page | Running it, what you'll see, what we found |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | How every piece connects, versions A and B, the local CAP-72 network |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | How every piece connects, versions B, B+ and A, the local CAP-72 network |
 | [version-a/CAP72-OBJECTIONS-AND-IMPROVEMENTS.md](version-a/CAP72-OBJECTIONS-AND-IMPROVEMENTS.md) | Why CAP-72 stalled, what we'd change (CAP-72a), a pitch for the thread |
 | [version-a/HOST-PATCH.md](version-a/HOST-PATCH.md) | The soroban-env-host patch that implements CAP-72a |
 | [../vendor/x402-stellar/PORT.md](../vendor/x402-stellar/PORT.md) | Our port of `@x402/stellar` to `@stellar/stellar-sdk` 17, with delegated credentials and custom-account signers |
@@ -28,8 +34,8 @@ You need Node 20+, Rust with the `wasm32v1-none` target, and the
 
 ```bash
 cd true-prices-demo && npm install && cd cap72 && npm install
-NETWORK=testnet ./setup-b.sh      # identities, 30 testnet USDC, deploys agent_policy, writes .env
-npm run demo                      # four steps, press Enter between them
+NETWORK=testnet ./setup-b.sh --plus   # B+: identities, 30 testnet USDC, deploys both contracts, writes .env
+npm run demo                          # four steps, press Enter between them
 ```
 
 In a Claude Code cloud session, run `scripts/session-start.sh` from the repo root
@@ -44,13 +50,14 @@ of each. `@x402/stellar` itself comes from `../vendor/x402-stellar`, our port to
 SDK 17 (upstream is still on SDK 16). The `.npmrc` sets `install-links=true` so
 npm copies it in and dedupes the SDK.
 
-`setup-b.sh` is safe to re-run. `./setup-b.sh --redeploy` deploys a fresh
-contract, which also resets the day's spending: do that before each
-presentation so the numbers match the run below.
+Leave out `--plus` for version B. `setup-b.sh` is safe to re-run and keeps the
+mode of the existing setup. `./setup-b.sh --plus --redeploy` deploys fresh
+contracts, which also resets the day's spending: do that before each
+presentation so the numbers match the runs below.
 
 Everything is testnet. `.env` holds testnet secrets and is git-ignored.
 
-## What you'll see
+## What you'll see (version B)
 
 A real run from Oct 20, 2026, on SDK 17 (contract
 [`CBASZP…VQYT`](https://stellar.expert/explorer/testnet/contract/CBASZP7456DMYUENQU2DOUXFBBNDLYDVN7HFA47EICAUDNOBUL3FVQYT)):
@@ -105,6 +112,47 @@ to behave. The direct submission goes around the facilitator, so the network
 itself has to say no, and it does: the transaction is in a ledger, marked
 failed, and its diagnostic events carry the policy's `PaymentTooLarge` error.
 
+## Version B+: real CAP-71 delegation
+
+In B+ the money sits in `agent_wallet`, which stands in for a CAP-72a
+G-account. Its `__check_auth` checks no signature of its own. It reads the
+delegates attached to the auth entry, checks each is one of its signers with
+enough weight, and hands the decision to them with CAP-71-01's
+`delegate_auth`. `agent_policy` is its one delegated signer, added by the owner
+with `set_signer` (CAP-72a's `SetOptionsOp`). Each payment carries
+`SorobanCredentialsAddressWithDelegates`: a void signature for the wallet and
+the agent's signature on the `agent_policy` delegate. That's the credential a
+CAP-72 G-account payment would carry, on testnet today.
+
+Step 2 shows the wallet's signer list (Oct 20, 2026, wallet
+[`CDUS6U…MNY7`](https://stellar.expert/explorer/testnet/contract/CDUS6UQBANQRTNR2BC5VNJKA27U5OCXVGTJQOYLXBX7VQHKAWZWZMNY7)):
+
+```text
+STEP 2  Owner attaches the spending policy
+  signers on CDUS6U…MNY7
+    owner key        GBLCAV…EMQL  (changes signers, like a master key)
+    delegated signer CCINYL…NNE6 (agent_policy), weight 1, threshold 1   <- CAP-72 makes this a G-account signer
+                     delegates approve payments only, never changes to the wallet (CAP-72a)
+  rules              max $1.00 per payment, $2.00 per day
+```
+
+Every other step and live edit prints the same results as B. The B+ run's
+transactions, each with delegated credentials onchain:
+
+| What | Transaction | Fee (stroops) |
+| --- | --- | --- |
+| Step 3, first $1.00 purchase | [77360577…](https://stellar.expert/explorer/testnet/tx/773605777569de8f7743141c52b61621770247e8da17bb20eae253a0a5867772) | 26,836 |
+| Step 4, second $1.00 purchase | [9797a62e…](https://stellar.expert/explorer/testnet/tx/9797a62e82b47ec926f8e24cf2d37d0bd337a6dd374ede2c779f005ff320f53f) | 13,568 |
+| Step 4, $2.00 direct submission, failed in `agent_policy` | [1db561b7…](https://stellar.expert/explorer/testnet/tx/1db561b78efec215b6300e0970ca7a1797193eab53b43e05930fda06852529c7) | 12,558 |
+
+Delegation adds about 450 stroops to a payment (13,568 against 13,115 in B).
+
+`agent_wallet` follows the CAP-72a rules: delegates must be Wasm contracts, and
+it refuses delegated authorization for any call on the wallet itself, so the
+policy can approve payments but never change the wallet. Its 8 unit tests run
+`agent_policy` as a real delegate with delegated credentials (`npm run
+test:contract`).
+
 ## Live edits
 
 Each one changes the rules onchain with the owner's key (`update_rules`), then
@@ -146,7 +194,7 @@ npm run facilitator                          # the local facilitator on :4022
 (cd .. && PORT=3001 STELLAR_RECIPIENT=G… npm start)   # a seller
 npm run buy:agent -- http://localhost:3001/price-check [--no-local-check]
 npm run direct-submit                        # lands one failing $2.00 payment
-npm run test:contract                        # agent_policy unit tests (7)
+npm run test:contract                        # agent_policy (7) and agent_wallet (8) unit tests
 ```
 
 ## What we found building it
@@ -202,6 +250,14 @@ Fees on testnet (fee charged, stroops, SDK 17 run):
 
 So the onchain policy adds about 1,500 stroops (0.00015 XLM) to a normal
 payment.
+
+7. **Delegated credentials and the stock client.** SDK 17's
+   `needsNonInvokerSigningBy` counts an entry with a void top-level signature as
+   unsigned even when its delegates have signed. For a delegating account that
+   is always the case (`agent_wallet`'s signature type is `()`), so the stock
+   x402 client refused every B+ payment. The port now treats an entry signed
+   through its delegates as signed (2 new tests, 194 total). Worth reporting to
+   js-stellar-sdk.
 
 ## Known limits
 

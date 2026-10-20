@@ -19,6 +19,9 @@ export const balanceOf = (who) => read(env.usdc, "balance", addr(who));
 export const rules = () => read(env.policy, "rules");
 export const spentToday = () => read(env.policy, "spent_today");
 export const policyOwner = () => read(env.policy, "owner");
+// Version B+ only: agent_wallet's delegated signers and threshold.
+export const walletSigners = () => read(env.wallet, "signers");
+export const walletThreshold = () => read(env.wallet, "threshold");
 
 /** Rules as the JSON the Stellar CLI takes for `update_rules --rules`. */
 export function rulesToCliJson(r) {

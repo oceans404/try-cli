@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { Asset, Keypair, Operation, StrKey } from "@stellar/stellar-sdk";
 import { HERE, FACILITATOR_URL, SELLERS, env, usd, usdc, short, txLink, need } from "./config.mjs";
-import { balanceOf, rules as readRules, spentToday, policyOwner, rulesToCliJson } from "./chain.mjs";
+import { balanceOf, rules as readRules, spentToday, policyOwner, walletSigners, walletThreshold, rulesToCliJson } from "./chain.mjs";
 import { buy } from "./buy-agent.mjs";
 import * as direct from "./direct-submit.mjs";
 
@@ -103,15 +103,15 @@ function updateRules(next) {
 // ---------- steps ----------
 async function step1() {
   console.log(B("STEP 1  Fund the agent wallet"));
-  const before = await balanceOf(env.policy);
+  const before = await balanceOf(env.wallet);
   if (before > 0n) console.log(dim(`  (the wallet already holds ${usdc(before)}; run ./setup-b.sh --redeploy for a clean run)`));
-  row("agent wallet", `${short(env.policy)}  (agent_policy, a smart account C-address)`);
+  row("agent wallet", `${short(env.wallet)}  (${env.plus ? "agent_wallet" : "agent_policy"}, a smart account C-address)`);
 
   // What an exchange sends: a classic Payment op. Its destination is a
   // MuxedAccount (G or M address), so a C-address can't even be encoded.
   let why = "it went through?";
   try {
-    Operation.payment({ destination: env.policy, asset: new Asset("USDC", need("USDC_ISSUER")), amount: "10" });
+    Operation.payment({ destination: env.wallet, asset: new Asset("USDC", need("USDC_ISSUER")), amount: "10" });
   } catch (e) {
     why = `can't build it: ${e.message} (PaymentOp.destination is a MuxedAccount, G or M only)`;
   }
@@ -119,8 +119,8 @@ async function step1() {
   console.log(dim("  This is the step CAP-72 turns into a plain payment."));
 
   cli(["contract", "invoke", "--id", env.usdc, "--source", "cap72-funder", "--network", CLI_NETWORK, "--",
-    "transfer", "--from", env.funder.publicKey(), "--to", env.policy, "--amount", "100000000"]);
-  const after = await balanceOf(env.policy);
+    "transfer", "--from", env.funder.publicKey(), "--to", env.wallet, "--amount", "100000000"]);
+  const after = await balanceOf(env.wallet);
   row("sent", "10.00 USDC via the USDC contract's transfer (not a classic payment)");
   row("balance", usdc(after));
   await pause();
@@ -130,8 +130,20 @@ async function step2() {
   const r = await readRules();
   const owner = await policyOwner();
   console.log(B("STEP 2  Owner attaches the spending policy"));
-  row("wallet", `${short(env.policy)}  agent_policy`, 19);
-  row("owner", `${short(owner)}  (the only key that can change the rules)`, 19);
+  if (env.plus) {
+    // The wallet's signer list, as a CAP-72a G-account's would look.
+    const signers = await walletSigners();
+    const threshold = await walletThreshold();
+    row(`signers on ${short(env.wallet)}`, "", 19);
+    row("  owner key", `${short(owner)}  (changes signers, like a master key)`, 19);
+    for (const [addr, weight] of signers instanceof Map ? signers : Object.entries(signers)) {
+      row("  delegated signer", `${short(addr)} (agent_policy), weight ${weight}, threshold ${threshold}   <- CAP-72 makes this a G-account signer`, 19);
+    }
+    row("", dim("delegates approve payments only, never changes to the wallet (CAP-72a)"), 19);
+  } else {
+    row("wallet", `${short(env.policy)}  agent_policy`, 19);
+    row("owner", `${short(owner)}  (the only key that can change the rules)`, 19);
+  }
   row("rules", `max ${usd(r.max_per_payment)} per payment, ${usd(r.daily_cap)} per day`, 19);
   row("", `allowed sellers: ${r.allowed_sellers.map((s) => `${short(s)}${s === env.seller ? " (Price check demo)" : ""}`).join(", ")}`, 19);
   const agentG = StrKey.encodeEd25519PublicKey(Buffer.from(r.agent_pubkey));
@@ -152,7 +164,7 @@ async function step3() {
   } else {
     row("result", red(`${res.status} ${res.payment?.policyError || res.refusal || ""}`));
   }
-  row("balance", usdc(await balanceOf(env.policy)));
+  row("balance", usdc(await balanceOf(env.wallet)));
   await pause();
   return res;
 }
@@ -198,18 +210,18 @@ async function step4({ directSubmit = true } = {}) {
   } else {
     console.log(dim("  direct submit skipped: with these rules a $2.00 payment is allowed and would move real money"));
   }
-  console.log(`  ${"balance".padEnd(25)}${usdc(await balanceOf(env.policy))}`);
+  console.log(`  ${"balance".padEnd(25)}${usdc(await balanceOf(env.wallet))}`);
   return results;
 }
 
 // ---------- live edits ----------
 // Live edits rerun step 4, which spends real (testnet) USDC, so keep the wallet stocked.
 async function topUp() {
-  const bal = await balanceOf(env.policy);
+  const bal = await balanceOf(env.wallet);
   if (bal >= 50_000_000n) return;
   cli(["contract", "invoke", "--id", env.usdc, "--source", "cap72-funder", "--network", CLI_NETWORK, "--",
-    "transfer", "--from", env.funder.publicKey(), "--to", env.policy, "--amount", "100000000"]);
-  console.log(dim(`  (funder topped the wallet up: ${usdc(bal)} -> ${usdc(await balanceOf(env.policy))})\n`));
+    "transfer", "--from", env.funder.publicKey(), "--to", env.wallet, "--amount", "100000000"]);
+  console.log(dim(`  (funder topped the wallet up: ${usdc(bal)} -> ${usdc(await balanceOf(env.wallet))})\n`));
 }
 
 async function edits() {

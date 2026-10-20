@@ -25,6 +25,10 @@ export function need(name) {
 export const env = {
   get usdc() { return need("USDC_SAC"); },
   get policy() { return need("POLICY_ID"); },
+  // Version B+: agent_wallet pays and delegates to agent_policy. Version B:
+  // agent_policy is the wallet itself.
+  get plus() { return Boolean(process.env.WALLET_ID); },
+  get wallet() { return process.env.WALLET_ID || need("POLICY_ID"); },
   get seller() { return need("SELLER_ADDRESS"); },
   get otherSeller() { return need("OTHER_SELLER_ADDRESS"); },
   get owner() { return need("OWNER_ADDRESS"); },
@@ -47,6 +51,12 @@ export const POLICY_ERRORS = {
   4: "BadSignature",
   5: "CallNotAllowed",
   6: "InvalidRules",
+  // agent_wallet (version B+)
+  101: "NoDelegates",
+  102: "UnknownDelegate",
+  103: "BelowThreshold",
+  104: "DelegatesCantManageWallet",
+  105: "NotAContract",
 };
 
 /** Pull "Error(Contract, #n)" out of a simulation or result message. */

@@ -20,10 +20,19 @@ index 934d791..7fe92ad 100644
    },
    "exports": {
 diff --git a/typescript/packages/mechanisms/stellar/src/exact/client/scheme.ts b/typescript/packages/mechanisms/stellar/src/exact/client/scheme.ts
-index 93a9e6b..aa754d8 100644
+index 93a9e6b..50ef375 100644
 --- a/typescript/packages/mechanisms/stellar/src/exact/client/scheme.ts
 +++ b/typescript/packages/mechanisms/stellar/src/exact/client/scheme.ts
-@@ -87,11 +87,26 @@ export class ExactStellarScheme implements SchemeNetworkClient {
+@@ -1,6 +1,6 @@
+-import { nativeToScVal, contract } from "@stellar/stellar-sdk";
++import { nativeToScVal, contract, Address, Operation } from "@stellar/stellar-sdk";
+ import { findDefaultAsset } from "../../defaultAssets";
+-import { handleSimulationResult } from "../../shared";
++import { getAddressCredentials, handleSimulationResult, isAuthEntrySigned } from "../../shared";
+ import {
+   getEstimatedLedgerCloseTimeSeconds,
+   getNetworkPassphrase,
+@@ -87,16 +87,36 @@ export class ExactStellarScheme implements SchemeNetworkClient {
          `Expected to sign with [${sourcePublicKey}], but got [${missingSigners.join(", ")}]`,
        );
      }
@@ -55,7 +64,18 @@ index 93a9e6b..aa754d8 100644
  
      await tx.simulate();
      handleSimulationResult(tx.simulation);
-@@ -104,7 +119,7 @@ export class ExactStellarScheme implements SchemeNetworkClient {
+ 
+-    missingSigners = tx.needsNonInvokerSigningBy();
++    // Not tx.needsNonInvokerSigningBy(): the sdk counts an entry with a void
++    // top-level signature as unsigned even when it carries signed delegates
++    // (CAP-71-01), which is how a delegating account authorizes.
++    missingSigners = tx
++      .needsNonInvokerSigningBy()
++      .filter(address => !signedThroughDelegates(tx.built?.operations?.[0], address));
+     if (missingSigners.length > 0) {
+       throw new Error(`unexpected signer(s) required: [${missingSigners.join(", ")}]`);
+     }
+@@ -104,7 +124,7 @@ export class ExactStellarScheme implements SchemeNetworkClient {
      return {
        x402Version,
        payload: {
@@ -64,6 +84,29 @@ index 93a9e6b..aa754d8 100644
        },
      };
    }
+@@ -138,3 +158,22 @@ export class ExactStellarScheme implements SchemeNetworkClient {
+     }
+   }
+ }
++
++/**
++ * Whether every auth entry for `address` in an invokeHostFunction operation is
++ * signed, counting an entry with a void top-level signature and signed
++ * delegates (CAP-71-01) as signed.
++ *
++ * @param op - The transaction's operation, if any
++ * @param address - The address the sdk reported as still needing a signature
++ * @returns `true` if the address's entries are all signed through delegates
++ */
++function signedThroughDelegates(op: unknown, address: string): boolean {
++  const invoke = op as Operation.InvokeHostFunction | undefined;
++  const auth = invoke?.type === "invokeHostFunction" ? (invoke.auth ?? []) : [];
++  const mine = auth.filter(entry => {
++    const creds = getAddressCredentials(entry.credentials);
++    return creds !== undefined && Address.fromScAddress(creds.address).toString() === address;
++  });
++  return mine.length > 0 && mine.every(entry => isAuthEntrySigned(entry.credentials));
++}
 diff --git a/typescript/packages/mechanisms/stellar/src/exact/facilitator/scheme.ts b/typescript/packages/mechanisms/stellar/src/exact/facilitator/scheme.ts
 index b454b15..fa6f661 100644
 --- a/typescript/packages/mechanisms/stellar/src/exact/facilitator/scheme.ts
@@ -713,13 +756,14 @@ index 460fd85..ff2701a 100644
  
        const tamperedPayload: PaymentPayload = {
 diff --git a/typescript/packages/mechanisms/stellar/test/unit/client.test.ts b/typescript/packages/mechanisms/stellar/test/unit/client.test.ts
-index 4467c67..6c47f04 100644
+index 4467c67..3f76e20 100644
 --- a/typescript/packages/mechanisms/stellar/test/unit/client.test.ts
 +++ b/typescript/packages/mechanisms/stellar/test/unit/client.test.ts
 @@ -1,6 +1,7 @@
 -import { nativeToScVal } from "@stellar/stellar-sdk";
-+import { nativeToScVal, xdr } from "@stellar/stellar-sdk";
- import { beforeEach, describe, expect, it, vi } from "vitest";
+-import { beforeEach, describe, expect, it, vi } from "vitest";
++import { Address, Keypair, nativeToScVal, xdr } from "@stellar/stellar-sdk";
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  import { STELLAR_PUBNET_CAIP2, STELLAR_TESTNET_CAIP2 } from "../../src/constants";
 +import { findDefaultAsset } from "../../src/defaultAssets";
  import { ExactStellarScheme } from "../../src/exact/client/scheme";
@@ -749,7 +793,84 @@ index 4467c67..6c47f04 100644
    });
  
    describe("createPaymentPayload", () => {
-@@ -258,5 +267,91 @@ describe("ExactStellarScheme", () => {
+@@ -208,6 +217,76 @@ describe("ExactStellarScheme", () => {
+       );
+     });
+ 
++    describe("delegated credentials (CAP-71-01)", () => {
++      const originalBuilt = mockTransaction.built;
++      afterEach(() => {
++        mockTransaction.built = originalBuilt;
++      });
++
++      const delegatedEntry = (address: string, delegateSigned: boolean) => {
++        const sc = (a: string) => new Address(a).toScAddress();
++        const delegate = Keypair.random().publicKey();
++        return new xdr.SorobanAuthorizationEntry({
++          credentials: xdr.SorobanCredentials.sorobanCredentialsAddressWithDelegates(
++            new xdr.SorobanAddressCredentialsWithDelegates({
++              addressCredentials: new xdr.SorobanAddressCredentials({
++                address: sc(address),
++                nonce: 1n,
++                signatureExpirationLedger: 100,
++                signature: xdr.ScVal.scvVoid(),
++              }),
++              delegates: [
++                new xdr.SorobanDelegateSignature({
++                  address: sc(delegate),
++                  signature: delegateSigned ? xdr.ScVal.scvU32(1) : xdr.ScVal.scvVoid(),
++                  nestedDelegates: [],
++                }),
++              ],
++            }),
++          ),
++          rootInvocation: new xdr.SorobanAuthorizedInvocation({
++            function: xdr.SorobanAuthorizedFunction.sorobanAuthorizedFunctionTypeContractFn(
++              new xdr.InvokeContractArgs({
++                contractAddress: sc(validPaymentReq.asset),
++                functionName: "transfer",
++                args: [],
++              }),
++            ),
++            subInvocations: [],
++          }),
++        });
++      };
++
++      const withAuth = (entry: xdr.SorobanAuthorizationEntry) => {
++        mockTransaction.built = {
++          toXdr: vi.fn().mockReturnValue("mock-xdr"),
++          operations: [{ type: "invokeHostFunction", auth: [entry] }],
++        } as typeof mockTransaction.built;
++      };
++
++      it("should accept an entry signed through its delegates despite a void top-level signature", async () => {
++        const client = new ExactStellarScheme(mockSigner);
++        withAuth(delegatedEntry(mockSignerAddress, true));
++        // The sdk still reports the address, because its top-level signature is void.
++        mockTransaction.needsNonInvokerSigningBy.mockReturnValueOnce([mockSignerAddress]);
++        mockTransaction.needsNonInvokerSigningBy.mockReturnValueOnce([mockSignerAddress]);
++
++        const result = await client.createPaymentPayload(2, validPaymentReq);
++        expect(result.payload).toEqual({ transaction: "mock-xdr" });
++      });
++
++      it("should still throw when a delegate is unsigned", async () => {
++        const client = new ExactStellarScheme(mockSigner);
++        withAuth(delegatedEntry(mockSignerAddress, false));
++        mockTransaction.needsNonInvokerSigningBy.mockReturnValueOnce([mockSignerAddress]);
++        mockTransaction.needsNonInvokerSigningBy.mockReturnValueOnce([mockSignerAddress]);
++
++        await expect(client.createPaymentPayload(2, validPaymentReq)).rejects.toThrow(
++          /unexpected signer\(s\) required/,
++        );
++      });
++    });
++
+     it.each([
+       [
+         "TESTNET",
+@@ -258,5 +337,91 @@ describe("ExactStellarScheme", () => {
          });
        },
      );

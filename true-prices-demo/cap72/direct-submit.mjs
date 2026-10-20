@@ -14,13 +14,13 @@
 // Usage: node direct-submit.mjs [amount-in-stroops]   (default 20000000, $2.00)
 import { SorobanDataBuilder, TransactionBuilder, rpc } from "@stellar/stellar-sdk";
 import { PASSPHRASE, server, env, policyError, POLICY_ERRORS, usd, txLink } from "./config.mjs";
-import { createPolicySigner } from "./signer.mjs";
+import { walletSigner } from "./signer.mjs";
 import { buildPayment } from "./payment.mjs";
 
 const ONE_DOLLAR = 10_000_000n;
 
 export async function prepare({ payTo = env.seller } = {}) {
-  const signer = createPolicySigner(env.agent, env.policy, PASSPHRASE);
+  const signer = walletSigner();
   const latest = await server.getLatestLedger();
   const validUntilLedger = latest.sequence + 1000; // about 80 minutes
   const template = await buildPayment({ signer, asset: env.usdc, payTo, amount: ONE_DOLLAR, validUntilLedger });

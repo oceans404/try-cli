@@ -6,7 +6,7 @@ import { x402Client } from "@x402/core/client";
 import { x402HTTPClient } from "@x402/core/http";
 import { ExactStellarScheme } from "@x402/stellar/exact/client";
 import { PASSPHRASE, RPC_URL, SELLERS, env, usdc, short, txLink, policyError } from "./config.mjs";
-import { createPolicySigner } from "./signer.mjs";
+import { walletSigner } from "./signer.mjs";
 import { PolicyExactScheme } from "./payment.mjs";
 
 // Retry once if a pooled keep-alive connection was closed by the seller meanwhile.
@@ -25,7 +25,7 @@ async function get(url, init) {
  * again because the facilitator refused).
  */
 export async function buy(url, { localCheck = true, agent = env.agent } = {}) {
-  const signer = createPolicySigner(agent, env.policy, PASSPHRASE);
+  const signer = walletSigner(agent);
   // A well-behaved agent uses the stock x402 client: the signer's authorizeEntry
   // lets it pay from the policy wallet. A misbehaving one uses PolicyExactScheme,
   // which sends the payment even when its own simulation says the policy refuses.
@@ -72,7 +72,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const url = args.find((a) => !a.startsWith("--")) || SELLERS.allowed;
   const r = await buy(url, { localCheck: !args.includes("--no-local-check") });
   if (r.terms) console.log(`402 terms      ${usdc(r.terms.amount)} to ${short(r.terms.payTo)}`);
-  console.log(`payer          ${env.policy} (agent_policy wallet)`);
+  console.log(`payer          ${env.wallet} (${env.plus ? "agent_wallet, delegating to agent_policy" : "agent_policy wallet"})`);
   console.log(`status         ${r.status} (${r.stage})`);
   if (r.reason) console.log(`refused by      ${r.reason}`);
   if (r.payment?.policyError) console.log(`policy         ${r.payment.policyError}`);

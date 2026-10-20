@@ -1,6 +1,6 @@
 import {
   ExactStellarScheme
-} from "./chunk-PB7EOGDZ.mjs";
+} from "./chunk-NGWSJQF5.mjs";
 import {
   DEFAULT_ESTIMATED_LEDGER_SECONDS,
   areAllDelegatesSigned,

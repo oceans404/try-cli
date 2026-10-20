@@ -369,7 +369,7 @@ var ExactStellarScheme = class {
     }
     await tx.simulate();
     handleSimulationResult(tx.simulation);
-    missingSigners = tx.needsNonInvokerSigningBy();
+    missingSigners = tx.needsNonInvokerSigningBy().filter((address) => !signedThroughDelegates(tx.built?.operations?.[0], address));
     if (missingSigners.length > 0) {
       throw new Error(`unexpected signer(s) required: [${missingSigners.join(", ")}]`);
     }
@@ -405,6 +405,15 @@ var ExactStellarScheme = class {
     }
   }
 };
+function signedThroughDelegates(op, address) {
+  const invoke = op;
+  const auth = invoke?.type === "invokeHostFunction" ? invoke.auth ?? [] : [];
+  const mine = auth.filter((entry) => {
+    const creds = getAddressCredentials(entry.credentials);
+    return creds !== void 0 && import_stellar_sdk3.Address.fromScAddress(creds.address).toString() === address;
+  });
+  return mine.length > 0 && mine.every((entry) => isAuthEntrySigned(entry.credentials));
+}
 
 // src/signer.ts
 var import_stellar_sdk4 = require("@stellar/stellar-sdk");

@@ -195,6 +195,23 @@ const signer = {
 };
 ```
 
+## Fix found on testnet: the client's final signer check
+
+The client re-simulates after signing and then asks
+`AssembledTransaction.needsNonInvokerSigningBy()` whether anyone still has to
+sign. sdk 17 answers that from `pendingAt` in `contract/utils.js`, which counts
+an entry as unsigned whenever its top-level signature is void, even when it
+carries signed delegates. Under CAP-71-01 that's the normal shape: a contract
+account that authorizes only through delegates (our demo's `agent_wallet`, whose
+signature type is `()`) always has a void top-level signature. So the stock
+client refused every delegated payment with `unexpected signer(s) required`.
+
+`src/exact/client/scheme.ts` now drops from that list any address whose auth
+entries are all signed through delegates, using the same `isAuthEntrySigned`
+helper as the facilitator (feature A). With no delegates, behavior is unchanged.
+Two unit tests cover it (signed delegates accepted, an unsigned delegate still
+refused). This is worth reporting to js-stellar-sdk as well.
+
 ## Test results
 
 Commands run in `typescript/packages/mechanisms/stellar` on the `stellar-sdk-17`
@@ -208,10 +225,10 @@ Unit tests (`pnpm test`, vitest with v8 coverage):
 
 ```
  Test Files  10 passed (10)
-      Tests  192 passed (192)
-   Duration  7.27s (transform 1.27s, setup 0ms, collect 9.06s, tests 5.24s, environment 4ms, prepare 1.97s)
-All files          |   92.26 |     88.8 |      88 |   92.26 |
+      Tests  194 passed (194)
 ```
+
+(192 before the client fix in the next section, which added 2.)
 
 Upstream had 163 tests (123 run, 35 skipped by the random facilitator selection
 plus 5 failing on sdk 17 before the port); the port adds 29: delegate tests in
