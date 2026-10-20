@@ -24,7 +24,7 @@ rules guard a normal account.
 | --- | --- | --- |
 | Policy contract | `contracts/agent_policy/src/lib.rs` | Soroban custom account. Holds the rules, checks the agent's signature, checks every payment, tracks the day's spending. Owner-only `update_rules` and `withdraw` |
 | Seller (x3) | `../server.js` | True Prices, an x402 API: `GET /price-check?item=…` for $1. The demo runs it three times (below) |
-| Facilitator | `facilitator.mjs` | Verifies and settles x402 payments. Stock `ExactStellarScheme` from `@x402/stellar` with a higher fee ceiling, plus a `GET /log` of verify results |
+| Facilitator | `facilitator.mjs` | Verifies and settles x402 payments. Stock `ExactStellarScheme` from `@x402/stellar` with stock settings, plus a `GET /log` of verify results |
 | Agent signer | `signer.mjs` | Signs Soroban auth entries for `agent_policy` with the agent's ed25519 key, as an `AgentSignature { public_key, signature }` |
 | Payment builder | `payment.mjs` | Builds the x402 payment: the USDC `transfer` from the wallet, simulated twice (see below). Also the x402 client scheme `PolicyExactScheme` |
 | Agent (buyer) | `buy-agent.mjs` | Makes one purchase: request, get 402, build and sign the payment, retry with it |
@@ -111,21 +111,30 @@ returns raw signature bytes, so `payment.mjs` replaces the client's
 
 ### Why the demo runs its own facilitator
 
-The public facilitators cap the fee at 50,000 stroops, and a smart account
-payment costs more. Version A also uses a credential type
-(`SorobanCredentialsAddressWithDelegates`) they don't accept yet. Details are
-in the spec's "Critical risk" section. The stock facilitator also rejects any
-contract event other than the token's `transfer`, which is why `agent_policy`
-emits no events.
+For version B the stock facilitator code works unchanged: `facilitator.mjs` is
+`ExactStellarScheme` with default settings. Running it locally keeps the demo
+off a shared service's uptime and latency (the spec measured 5.7 to 20.5
+seconds per paid request on the public testnet facilitator) and gives the
+runner a log of exact refusal reasons. Version A needs a local one anyway: it
+uses a credential type (`SorobanCredentialsAddressWithDelegates`) the public
+facilitators don't accept yet.
+
+Two facilitator checks shaped the contract. The stock facilitator rejects any
+contract event other than the token's `transfer`, so `agent_policy` emits no
+events. And it caps the fee at 50,000 stroops. A policy payment costs about
+13,000, or 26,000 for the first one each day, which fits only because the day
+bucket lives in temporary storage (see the daily cap section). The spec
+expected about 290,000, measured on the heavier OpenZeppelin smart account.
 
 ## Where a bad payment gets stopped
 
 There are three places, and the demo shows each one.
 
 1. **The agent's own client.** The enforcing simulation fails, so a well-behaved
-   agent refuses locally. This is the stock x402 behavior too. In step 4 the
-   runner turns this check off (`localCheck: false`) to act like a misbehaving
-   agent.
+   agent refuses locally. This is the stock x402 behavior too, and x402's client
+   also has its own spend controls (by default at most $1 per payment). Both are
+   the agent's software, so in step 4 the runner turns them off
+   (`localCheck: false`) to act like a misbehaving agent.
 2. **The facilitator.** It simulates every payment before settling. A policy
    failure comes back as `invalid_exact_stellar_payload_simulation_failed`, and
    the seller answers 402 again. Nothing reaches the chain.
@@ -153,12 +162,18 @@ start of step 4 and submits the $2 transaction at the end.
 
 ## How the daily cap works
 
-`__check_auth` keeps one persistent entry per UTC day, keyed on
+`__check_auth` keeps one entry per UTC day, keyed on
 `ledger timestamp / 86400`, holding the amount spent that day. A payment passes
 only if the total stays at or under `daily_cap`. It's a fixed calendar day, not
 a rolling 24 hours, which keeps it to one entry and doesn't depend on ledger
 close times. Simulations don't persist anything, so only applied payments
 count.
+
+The entry lives in temporary storage, and every write extends it to two days,
+so it always outlives its day and then simply expires. The first version used
+persistent storage, and a new persistent entry pays rent for the network's long
+minimum TTL: the first payment of each day cost 409,731 stroops against 11,840
+for the next one. With temporary storage the first payment costs 26,328.
 
 ## Version B and version A side by side
 
@@ -171,7 +186,7 @@ count.
 | Attaching the policy (step 2) | Deploying it is attaching it | `SetOptionsOp` adds `agent_policy` as a signer (weight 1, master weight 2, thresholds 1/1/2) |
 | Auth entry credentials | `SorobanCredentialsAddress` for the C-address, `AgentSignature` as the signature | `SorobanCredentialsAddressWithDelegates` for the G-address: void top-level signature, one delegate `{ agent_policy, AgentSignature }` |
 | Who runs `__check_auth` | The host, because the C-address is a custom account | The host, through CAP-71-01's delegation, after checking `agent_policy` is a delegated signer on the account |
-| Facilitator | Stock scheme, fee ceiling raised | Also accepts the delegated credential type |
+| Facilitator | Stock scheme, stock settings | Also accepts the delegated credential type |
 | Network | Testnet through RPC | A `stellar/quickstart` image built from patched core, host and RPC |
 | Explorer links | stellar.expert | None. The runner prints results from RPC `getTransaction` |
 
@@ -209,7 +224,11 @@ What each layer needs:
    host checks each delegate is a delegated signer on the account, runs its
    `__check_auth` through CAP-71-01's `delegate_account_auth`, adds up signer
    weights, and compares against the account's threshold. This is the core of
-   CAP-72 for this demo.
+   CAP-72 for this demo. The patch implements the narrower "CAP-72a" we propose
+   in [the objections doc](version-a/CAP72-OBJECTIONS-AND-IMPROVEMENTS.md): no
+   G-account contract, delegated weight counts toward Medium only (a delegate
+   can never change the account's signers or thresholds), and delegates must be
+   contracts.
 3. **stellar-core.** Accept the new signer type in `SetOptionsOp`, ignore it in
    classic signature checks (a contract can't sign a classic transaction), and
    reject it in `extraSigners`. Everything sits behind the next protocol
