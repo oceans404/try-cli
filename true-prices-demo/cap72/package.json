@@ -1,0 +1,24 @@
+{
+  "name": "true-prices-cap72",
+  "version": "1.0.0",
+  "description": "CAP-72 agent wallet demo: an agent pays an x402 seller through an onchain spending policy",
+  "scripts": {
+    "demo": "node demo.mjs",
+    "facilitator": "node facilitator.mjs",
+    "buy:agent": "node buy-agent.mjs",
+    "direct-submit": "node direct-submit.mjs",
+    "test:contract": "cd contracts/agent_policy && cargo test"
+  },
+  "type": "module",
+  "private": true,
+  "dependencies": {
+    "@stellar/stellar-sdk": "17.1.0",
+    "@x402/core": "2.27.0",
+    "@x402/stellar": "2.27.0",
+    "dotenv": "^18.0.3",
+    "express": "^5.2.1"
+  },
+  "overrides": {
+    "@stellar/stellar-sdk": "$@stellar/stellar-sdk"
+  }
+}
