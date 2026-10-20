@@ -1,0 +1,1991 @@
+diff --git a/typescript/packages/mechanisms/stellar/package.json b/typescript/packages/mechanisms/stellar/package.json
+index 934d791..7fe92ad 100644
+--- a/typescript/packages/mechanisms/stellar/package.json
++++ b/typescript/packages/mechanisms/stellar/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "@x402/stellar",
+-  "version": "2.28.0",
++  "version": "2.28.0-sdk17.0",
+   "main": "./dist/cjs/index.js",
+   "module": "./dist/esm/index.js",
+   "types": "./dist/cjs/index.d.ts",
+@@ -51,7 +51,7 @@
+     "vitest": "^3.2.7"
+   },
+   "dependencies": {
+-    "@stellar/stellar-sdk": "^16.3.0",
++    "@stellar/stellar-sdk": "^17.2.1",
+     "@x402/core": "workspace:~"
+   },
+   "exports": {
+diff --git a/typescript/packages/mechanisms/stellar/src/exact/client/scheme.ts b/typescript/packages/mechanisms/stellar/src/exact/client/scheme.ts
+index 93a9e6b..aa754d8 100644
+--- a/typescript/packages/mechanisms/stellar/src/exact/client/scheme.ts
++++ b/typescript/packages/mechanisms/stellar/src/exact/client/scheme.ts
+@@ -87,11 +87,26 @@ export class ExactStellarScheme implements SchemeNetworkClient {
+         `Expected to sign with [${sourcePublicKey}], but got [${missingSigners.join(", ")}]`,
+       );
+     }
+-    await tx.signAuthEntries({
+-      address: sourcePublicKey,
+-      signAuthEntry: this.signer.signAuthEntry,
+-      expiration: maxLedger,
+-    });
++    if (this.signer.authorizeEntry) {
++      // Custom-account (C-address) payers and delegated signers own the
++      // signature shape: hand the whole entry to the signer's authorizeEntry.
++      // The SDK's signAuthEntries only calls the override for entries whose
++      // top-level address matches `address`, and it never invokes
++      // signAuthEntry when an authorizeEntry override is given.
++      const authorizeEntry = this.signer.authorizeEntry;
++      await tx.signAuthEntries({
++        address: sourcePublicKey,
++        expiration: maxLedger,
++        authorizeEntry: (entry, _signer, validUntilLedgerSeq, networkPassphrase) =>
++          authorizeEntry(entry, validUntilLedgerSeq, networkPassphrase),
++      });
++    } else {
++      await tx.signAuthEntries({
++        address: sourcePublicKey,
++        signAuthEntry: this.signer.signAuthEntry,
++        expiration: maxLedger,
++      });
++    }
+ 
+     await tx.simulate();
+     handleSimulationResult(tx.simulation);
+@@ -104,7 +119,7 @@ export class ExactStellarScheme implements SchemeNetworkClient {
+     return {
+       x402Version,
+       payload: {
+-        transaction: tx.built!.toXDR(),
++        transaction: tx.built!.toXdr(),
+       },
+     };
+   }
+diff --git a/typescript/packages/mechanisms/stellar/src/exact/facilitator/scheme.ts b/typescript/packages/mechanisms/stellar/src/exact/facilitator/scheme.ts
+index b454b15..fa6f661 100644
+--- a/typescript/packages/mechanisms/stellar/src/exact/facilitator/scheme.ts
++++ b/typescript/packages/mechanisms/stellar/src/exact/facilitator/scheme.ts
+@@ -12,7 +12,12 @@ import {
+ } from "@stellar/stellar-sdk";
+ import { Api } from "@stellar/stellar-sdk/rpc";
+ import { STELLAR_WILDCARD_CAIP2 } from "../../constants";
+-import { gatherAuthEntrySignatureStatus, getAddressCredentials } from "../../shared";
++import {
++  collectDelegateAddresses,
++  gatherAuthEntrySignatureStatus,
++  getAddressCredentials,
++  getDelegateSignatures,
++} from "../../shared";
+ import { ExactStellarPayloadV2 } from "../../types";
+ import {
+   getEstimatedLedgerCloseTimeSeconds,
+@@ -268,7 +273,7 @@ export class ExactStellarScheme implements SchemeNetworkFacilitator {
+       }
+       const facilitatorAccount = await server.getAccount(signer.address);
+ 
+-      // SDK v16: `fee` is the inclusion buffer only; build() adds sorobanData.resourceFee()
++      // SDK v17: `fee` is the inclusion buffer only; build() adds sorobanData.resourceFee()
+       // from the settle-time simulation, so tx.fee = inclusionFeeStroops + minResourceFee.
+       const rebuiltTx = new TransactionBuilder(facilitatorAccount, {
+         fee: String(this.inclusionFeeStroops),
+@@ -288,7 +293,7 @@ export class ExactStellarScheme implements SchemeNetworkFacilitator {
+         .build();
+ 
+       // Step 5: Sign inner transaction with the selected signer's key
+-      const { signedTxXdr, error: signError } = await signer.signTransaction(rebuiltTx.toXDR(), {
++      const { signedTxXdr, error: signError } = await signer.signTransaction(rebuiltTx.toXdr(), {
+         networkPassphrase,
+       });
+ 
+@@ -306,7 +311,7 @@ export class ExactStellarScheme implements SchemeNetworkFacilitator {
+       let txToSubmit: Transaction | FeeBumpTransaction;
+ 
+       if (this.feeBumpSigner) {
+-        const signedInnerTx = TransactionBuilder.fromXDR(
++        const signedInnerTx = TransactionBuilder.fromXdr(
+           signedTxXdr,
+           networkPassphrase,
+         ) as Transaction;
+@@ -320,7 +325,7 @@ export class ExactStellarScheme implements SchemeNetworkFacilitator {
+         );
+ 
+         const { signedTxXdr: signedFeeBumpXdr, error: feeBumpSignError } =
+-          await this.feeBumpSigner.signTransaction(feeBumpTx.toXDR(), { networkPassphrase });
++          await this.feeBumpSigner.signTransaction(feeBumpTx.toXdr(), { networkPassphrase });
+ 
+         if (feeBumpSignError) {
+           return {
+@@ -332,12 +337,12 @@ export class ExactStellarScheme implements SchemeNetworkFacilitator {
+           };
+         }
+ 
+-        txToSubmit = TransactionBuilder.fromXDR(
++        txToSubmit = TransactionBuilder.fromXdr(
+           signedFeeBumpXdr,
+           networkPassphrase,
+         ) as FeeBumpTransaction;
+       } else {
+-        txToSubmit = TransactionBuilder.fromXDR(signedTxXdr, networkPassphrase) as Transaction;
++        txToSubmit = TransactionBuilder.fromXdr(signedTxXdr, networkPassphrase) as Transaction;
+       }
+ 
+       // Step 7: Submit transaction to network
+@@ -456,18 +461,16 @@ export class ExactStellarScheme implements SchemeNetworkFacilitator {
+       const invokeOp = operation as Operation.InvokeHostFunction;
+       const func = invokeOp.func;
+ 
+-      if (!func || func.switch().name !== "hostFunctionTypeInvokeContract") {
++      if (!func || func.type !== "hostFunctionTypeInvokeContract") {
+         return { response: invalidVerifyResponse("invalid_exact_stellar_payload_wrong_operation") };
+       }
+ 
+       // Step 5: Validate contract address and function name
+-      const invokeContractArgs = func.invokeContract();
+-      const contractAddress = Address.fromScAddress(
+-        invokeContractArgs.contractAddress(),
+-      ).toString();
+-      const functionName = invokeContractArgs.functionName().toString();
++      const invokeContractArgs = func.invokeContract;
++      const contractAddress = Address.fromScAddress(invokeContractArgs.contractAddress).toString();
++      const functionName = invokeContractArgs.functionName.toString();
+ 
+-      const args = invokeContractArgs.args();
++      const args = invokeContractArgs.args;
+       if (contractAddress !== requirements.asset) {
+         return { response: invalidVerifyResponse("invalid_exact_stellar_payload_wrong_asset") };
+       }
+@@ -643,15 +646,15 @@ export class ExactStellarScheme implements SchemeNetworkFacilitator {
+     // Parse events into
+     for (const diagnosticEvent of events) {
+       try {
+-        const event = diagnosticEvent.event();
++        const event = diagnosticEvent.event;
+ 
+         // Skip non-contract events
+-        if (event.type().name !== "contract") {
++        if (event.type.name !== "contract") {
+           continue;
+         }
+ 
+-        const body = event.body().v0();
+-        const topics = body.topics();
++        const body = event.body.v0;
++        const topics = body.topics;
+ 
+         // Check if this is a transfer event (first topic is "transfer" symbol)
+         if (topics.length < 3) {
+@@ -661,15 +664,15 @@ export class ExactStellarScheme implements SchemeNetworkFacilitator {
+           );
+         }
+ 
+-        const topicType = topics[0].switch().name;
+-        if (topicType !== "scvSymbol") {
++        const topic = topics[0];
++        if (topic.type !== "scvSymbol") {
+           return invalidVerifyResponse(
+             "invalid_exact_stellar_payload_event_not_transfer",
+             fromAddress,
+           );
+         }
+ 
+-        const symbol = topics[0].sym().toString();
++        const symbol = topic.sym.toString();
+         if (symbol !== "transfer") {
+           return invalidVerifyResponse(
+             "invalid_exact_stellar_payload_event_not_transfer",
+@@ -677,7 +680,7 @@ export class ExactStellarScheme implements SchemeNetworkFacilitator {
+           );
+         }
+ 
+-        const contractIdHash = event.contractId();
++        const contractIdHash = event.contractId;
+         if (!contractIdHash)
+           return invalidVerifyResponse(
+             "invalid_exact_stellar_payload_event_missing_contract_id",
+@@ -696,7 +699,7 @@ export class ExactStellarScheme implements SchemeNetworkFacilitator {
+         // Extract from, to, and amount
+         const from = scValToNative(topics[1]) as string;
+         const to = scValToNative(topics[2]) as string;
+-        const amount = scValToNative(body.data()) as bigint;
++        const amount = scValToNative(body.data) as bigint;
+ 
+         transferEvents.push({ from, to, amount });
+       } catch (error: unknown) {
+@@ -739,6 +742,13 @@ export class ExactStellarScheme implements SchemeNetworkFacilitator {
+    * facilitator safety, no sub-invocations, and that the payer has signed and
+    * no other signatures are pending (per simulation).
+    *
++   * Address credentials may be legacy V1, CAP-71 V2, or CAP-71-01
++   * address-with-delegates. For the delegates arm the payer is the top-level
++   * address, the expiration check uses the top-level
++   * `signatureExpirationLedger`, the entry counts as signed when the top-level
++   * signature is present or when every (nested) delegate has signed, and the
++   * facilitator must not appear as the top-level address or as any delegate.
++   *
+    * @param invokeOp - The invoke host function operation
+    * @param facilitatorAddresses - Set of all facilitator addresses
+    * @param fromAddress - The payer's address (for error reporting)
+@@ -760,10 +770,10 @@ export class ExactStellarScheme implements SchemeNetworkFacilitator {
+     }
+ 
+     for (const auth of invokeOp.auth) {
+-      // Only address-based credentials are allowed: legacy V1 or CAP-71 V2,
+-      // which the network accepts from Protocol 28 onward. Source-account and
+-      // delegated credentials are rejected.
+-      const addressCredentials = getAddressCredentials(auth.credentials());
++      // Only address-based credentials are allowed: legacy V1, CAP-71 V2
++      // (which the network accepts from Protocol 28 onward) or CAP-71-01
++      // address-with-delegates. Source-account credentials are rejected.
++      const addressCredentials = getAddressCredentials(auth.credentials);
+       if (!addressCredentials) {
+         return invalidVerifyResponse(
+           "invalid_exact_stellar_payload_unsupported_credential_type",
+@@ -771,10 +781,15 @@ export class ExactStellarScheme implements SchemeNetworkFacilitator {
+         );
+       }
+ 
+-      const authAddress = Address.fromScAddress(addressCredentials.address()).toString();
++      const authAddress = Address.fromScAddress(addressCredentials.address).toString();
+ 
+-      // Facilitator must not appear in auth entries
+-      if (facilitatorAddresses.has(authAddress)) {
++      // Facilitator must not appear in auth entries, neither as the top-level
++      // address nor as any (nested) delegate.
++      const delegateAddresses = collectDelegateAddresses(getDelegateSignatures(auth.credentials));
++      if (
++        facilitatorAddresses.has(authAddress) ||
++        delegateAddresses.some(delegateAddress => facilitatorAddresses.has(delegateAddress))
++      ) {
+         return invalidVerifyResponse(
+           "invalid_exact_stellar_payload_facilitator_in_auth",
+           fromAddress,
+@@ -782,7 +797,7 @@ export class ExactStellarScheme implements SchemeNetworkFacilitator {
+       }
+ 
+       // Check signature expiration is within allowed window (with ledger tolerance for RPC skew)
+-      const expirationLedger = addressCredentials.signatureExpirationLedger();
++      const expirationLedger = addressCredentials.signatureExpirationLedger;
+       if (expirationLedger > maxLedger + SIGNATURE_EXPIRATION_LEDGER_TOLERANCE) {
+         return invalidVerifyResponse(
+           "invalid_exact_stellar_signature_expiration_too_far",
+@@ -791,8 +806,8 @@ export class ExactStellarScheme implements SchemeNetworkFacilitator {
+       }
+ 
+       // No sub-invocations allowed
+-      const rootInvocation = auth.rootInvocation();
+-      if (rootInvocation.subInvocations().length > 0) {
++      const rootInvocation = auth.rootInvocation;
++      if (rootInvocation.subInvocations.length > 0) {
+         return invalidVerifyResponse(
+           "invalid_exact_stellar_payload_has_subinvocations",
+           fromAddress,
+diff --git a/typescript/packages/mechanisms/stellar/src/shared.ts b/typescript/packages/mechanisms/stellar/src/shared.ts
+index c621572..ccaf6a3 100644
+--- a/typescript/packages/mechanisms/stellar/src/shared.ts
++++ b/typescript/packages/mechanisms/stellar/src/shared.ts
+@@ -27,26 +27,112 @@ export function handleSimulationResult(simulation?: Api.SimulateTransactionRespo
+ 
+ /**
+  * Returns the address credentials carried by a Soroban credential union, for
+- * both the legacy V1 `sorobanCredentialsAddress` arm and the CAP-71 V2
+- * `sorobanCredentialsAddressV2` arm, which networks accept from Protocol 28
+- * onward. Both arms wrap the same `SorobanAddressCredentials` structure and
+- * differ only in the preimage the signer commits to. Returns `undefined` for
+- * every other arm (source-account, delegated).
++ * the legacy V1 `sorobanCredentialsAddress` arm, the CAP-71 V2
++ * `sorobanCredentialsAddressV2` arm (accepted from Protocol 28 onward), and
++ * the CAP-71-01 `sorobanCredentialsAddressWithDelegates` arm, where the
++ * top-level address credentials are returned (the delegates are available via
++ * {@link getDelegateSignatures}). All three arms wrap the same
++ * `SorobanAddressCredentials` structure and differ only in the preimage the
++ * signer commits to and in who may sign. Returns `undefined` for the
++ * source-account arm.
+  *
+  * @param credentials - The credential union from an auth entry
+- * @returns The address credentials, or undefined for non-address arms
++ * @returns The (top-level) address credentials, or undefined for the source-account arm
+  */
+ export function getAddressCredentials(
+   credentials: xdr.SorobanCredentials,
+ ): xdr.SorobanAddressCredentials | undefined {
+-  const credentialsType = credentials.switch();
+-  if (credentialsType === xdr.SorobanCredentialsType.sorobanCredentialsAddress()) {
+-    return credentials.address();
++  switch (credentials.type) {
++    case "sorobanCredentialsAddress":
++      return credentials.address;
++    case "sorobanCredentialsAddressV2":
++      return credentials.addressV2;
++    case "sorobanCredentialsAddressWithDelegates":
++      return credentials.addressWithDelegates.addressCredentials;
++    default:
++      return undefined;
+   }
+-  if (credentialsType === xdr.SorobanCredentialsType.sorobanCredentialsAddressV2()) {
+-    return credentials.addressV2();
++}
++
++/**
++ * Returns the delegate signatures attached to a CAP-71-01
++ * `sorobanCredentialsAddressWithDelegates` credential union, or an empty array
++ * for every other arm.
++ *
++ * @param credentials - The credential union from an auth entry
++ * @returns The top-level delegate signatures (each may carry nested delegates)
++ */
++export function getDelegateSignatures(
++  credentials: xdr.SorobanCredentials,
++): xdr.SorobanDelegateSignature[] {
++  if (credentials.type === "sorobanCredentialsAddressWithDelegates") {
++    return credentials.addressWithDelegates.delegates;
++  }
++  return [];
++}
++
++/**
++ * Whether a credential signature value carries a signature.
++ * An `scvVoid` signature means the node has not signed.
++ *
++ * @param signature - The signature ScVal from address credentials or a delegate
++ * @returns `true` if the signature is anything other than `scvVoid`
++ */
++export function isSignaturePresent(signature: xdr.ScVal): boolean {
++  return signature.type !== "scvVoid";
++}
++
++/**
++ * Whether every delegate in the tree (recursively, including nested delegates)
++ * carries a signature. An empty list is vacuously fully signed; callers that
++ * need "at least one delegate" must check the length themselves.
++ *
++ * @param delegates - The delegate signatures to inspect
++ * @returns `true` if every delegate and nested delegate has a non-void signature
++ */
++export function areAllDelegatesSigned(delegates: xdr.SorobanDelegateSignature[]): boolean {
++  return delegates.every(
++    delegate =>
++      isSignaturePresent(delegate.signature) && areAllDelegatesSigned(delegate.nestedDelegates),
++  );
++}
++
++/**
++ * Collects every delegate address in the tree (recursively, including nested
++ * delegates) as a strkey string.
++ *
++ * @param delegates - The delegate signatures to walk
++ * @returns The delegate addresses, depth-first, duplicates preserved
++ */
++export function collectDelegateAddresses(delegates: xdr.SorobanDelegateSignature[]): string[] {
++  return delegates.flatMap(delegate => [
++    Address.fromScAddress(delegate.address).toString(),
++    ...collectDelegateAddresses(delegate.nestedDelegates),
++  ]);
++}
++
++/**
++ * Whether an address-based auth entry counts as signed.
++ *
++ * For the V1 and V2 address arms this is simply whether the signature is not
++ * `scvVoid`. For the CAP-71-01 delegates arm the entry also counts as signed
++ * when the top-level signature is void but delegates are present and every
++ * delegate (recursively) carries a signature, which is how a G-account
++ * authorizes purely through its delegated signers (CAP-72).
++ *
++ * @param credentials - The credential union from an auth entry
++ * @returns `true` if the entry is signed, `false` if it is pending or has no address credentials
++ */
++export function isAuthEntrySigned(credentials: xdr.SorobanCredentials): boolean {
++  const addressCredentials = getAddressCredentials(credentials);
++  if (!addressCredentials) {
++    return false;
+   }
+-  return undefined;
++  if (isSignaturePresent(addressCredentials.signature)) {
++    return true;
++  }
++  const delegates = getDelegateSignatures(credentials);
++  return delegates.length > 0 && areAllDelegatesSigned(delegates);
+ }
+ 
+ /**
+@@ -127,18 +213,17 @@ export function gatherAuthEntrySignatureStatus({
+   const pendingSignature: string[] = [];
+ 
+   for (const entry of invokeOp.auth ?? []) {
+-    // Handle address-based credentials, both legacy V1 and CAP-71 V2 (accepted
+-    // by the network from Protocol 28 onward). Source-account credentials are
++    // Handle address-based credentials: legacy V1, CAP-71 V2 (accepted by the
++    // network from Protocol 28 onward) and CAP-71-01 address-with-delegates,
++    // where the payer is the top-level address. Source-account credentials are
+     // skipped - these use the transaction source.
+-    const addressCredentials = getAddressCredentials(entry.credentials());
++    const addressCredentials = getAddressCredentials(entry.credentials);
+     if (addressCredentials) {
+-      const address = Address.fromScAddress(addressCredentials.address()).toString();
+-      const signature = addressCredentials.signature();
+-
+-      // Check if already signed (signature is not scvVoid)
+-      const isSigned = signature.switch().name !== "scvVoid";
++      const address = Address.fromScAddress(addressCredentials.address).toString();
+ 
+-      if (isSigned) {
++      // Signed when the top-level signature is not scvVoid, or (delegates arm)
++      // when every delegate has signed on the account's behalf.
++      if (isAuthEntrySigned(entry.credentials)) {
+         alreadySigned.push(address);
+       } else {
+         pendingSignature.push(address);
+diff --git a/typescript/packages/mechanisms/stellar/src/signer.ts b/typescript/packages/mechanisms/stellar/src/signer.ts
+index 9a6498b..a93c990 100644
+--- a/typescript/packages/mechanisms/stellar/src/signer.ts
++++ b/typescript/packages/mechanisms/stellar/src/signer.ts
+@@ -1,4 +1,4 @@
+-import { Keypair } from "@stellar/stellar-sdk";
++import { Keypair, xdr } from "@stellar/stellar-sdk";
+ import { basicNodeSigner, SignAuthEntry, SignTransaction } from "@stellar/stellar-sdk/contract";
+ import { STELLAR_TESTNET_CAIP2 } from "./constants";
+ import { getNetworkPassphrase } from "./utils";
+@@ -26,18 +26,80 @@ export type Ed25519Signer = {
+  */
+ export type FacilitatorStellarSigner = Ed25519Signer;
+ 
++/**
++ * Signs (authorizes) a whole Soroban authorization entry and returns the
++ * signed copy.
++ *
++ * This is the escape hatch for custom accounts (smart wallets, passkey or
++ * WebAuthn signers, multisig contracts) whose `__check_auth` expects a
++ * signature structure other than the built-in `{public_key, signature}`
++ * vector, and for CAP-71-01 delegated signing. The callback receives the
++ * unsigned entry exactly as simulation returned it; it must return an entry
++ * with the same `rootInvocation` and credentials whose
++ * `signatureExpirationLedger` equals `validUntilLedgerSeq` and whose
++ * `signature` is filled in. The SDK's `authorizeEntry` (with a
++ * `SigningCallback` returning `{ signatureScVal }`), `buildAuthorizationEntryPreimage`
++ * and `buildWithDelegatesEntry` are the usual building blocks.
++ *
++ * @param entry - The unsigned authorization entry from simulation
++ * @param validUntilLedgerSeq - The (exclusive) ledger sequence until which the signature is valid
++ * @param networkPassphrase - The network passphrase committed into the signature preimage
++ * @returns The signed authorization entry
++ */
++export type ClientAuthorizeEntry = (
++  entry: xdr.SorobanAuthorizationEntry,
++  validUntilLedgerSeq: number,
++  networkPassphrase: string,
++) => Promise<xdr.SorobanAuthorizationEntry>;
++
+ /**
+  * Client signer for Stellar transactions.
+  *
+  * Used by x402 clients to sign auth entries. Supports both classic (G) and contract (C) accounts.
+  * signTransaction is optional for client signers.
+  *
++ * For a classic (G) account, `signAuthEntry` is enough: it returns raw Ed25519
++ * signature bytes over the auth entry preimage and the SDK wraps them in the
++ * standard `{public_key, signature}` structure.
++ *
++ * For a contract (C) account with a custom `__check_auth`, or for delegated
++ * signing (CAP-71-01), provide `authorizeEntry` as well. When present, the
++ * client hands each of the payer's auth entries to it instead of calling
++ * `signAuthEntry`, so the callback owns the exact signature shape written into
++ * the credentials. `signAuthEntry` is still required by the type (for API
++ * compatibility and type guards) but is not called in that case.
++ *
++ * @example
++ * ```ts
++ * import { authorizeEntry, xdr } from "@stellar/stellar-sdk";
++ *
++ * const signer: ClientStellarSigner = {
++ *   address: "C...",            // the smart account
++ *   signAuthEntry: async () => { throw new Error("not used"); },
++ *   authorizeEntry: (entry, validUntil, passphrase) =>
++ *     authorizeEntry(
++ *       entry,
++ *       async (_preimage, payload) => ({
++ *         // whatever your contract's __check_auth expects
++ *         signatureScVal: xdr.ScVal.scvBytes(await passkey.sign(payload)),
++ *       }),
++ *       validUntil,
++ *       passphrase,
++ *     ),
++ * };
++ * ```
++ *
+  * @see https://github.com/stellar/stellar-protocol/blob/master/ecosystem/sep-0043.md
+  */
+ export type ClientStellarSigner = {
+   address: string;
+   signAuthEntry: SignAuthEntry;
+   signTransaction?: SignTransaction;
++  /**
++   * Optional custom entry authorizer for smart-account (C) payers and
++   * delegated signing. See {@link ClientAuthorizeEntry}.
++   */
++  authorizeEntry?: ClientAuthorizeEntry;
+ };
+ 
+ /**
+@@ -86,7 +148,8 @@ export function isFacilitatorStellarSigner(signer: unknown): signer is Facilitat
+ /**
+  * Type guard for ClientStellarSigner.
+  *
+- * Checks for required methods: address, signAuthEntry. signTransaction is optional.
++ * Checks for required methods: address, signAuthEntry. signTransaction and
++ * authorizeEntry are optional but must be functions when present.
+  *
+  * @param signer - Value to check
+  * @returns `true` if signer is a ClientStellarSigner
+@@ -97,6 +160,7 @@ export function isClientStellarSigner(signer: unknown): signer is ClientStellarS
+   return (
+     typeof s.address === "string" &&
+     typeof s.signAuthEntry === "function" &&
+-    (s.signTransaction === undefined || typeof s.signTransaction === "function")
++    (s.signTransaction === undefined || typeof s.signTransaction === "function") &&
++    (s.authorizeEntry === undefined || typeof s.authorizeEntry === "function")
+   );
+ }
+diff --git a/typescript/packages/mechanisms/stellar/test/integrations/exact-stellar.test.ts b/typescript/packages/mechanisms/stellar/test/integrations/exact-stellar.test.ts
+index 460fd85..ff2701a 100644
+--- a/typescript/packages/mechanisms/stellar/test/integrations/exact-stellar.test.ts
++++ b/typescript/packages/mechanisms/stellar/test/integrations/exact-stellar.test.ts
+@@ -1,4 +1,12 @@
+-import { Keypair, Networks as StellarNetworks, authorizeEntry, xdr } from "@stellar/stellar-sdk";
++import {
++  Keypair,
++  Networks as StellarNetworks,
++  Operation,
++  Transaction,
++  TransactionBuilder,
++  authorizeEntry,
++  xdr,
++} from "@stellar/stellar-sdk";
+ import { x402Client, x402HTTPClient } from "@x402/core/client";
+ import { x402Facilitator } from "@x402/core/facilitator";
+ import {
+@@ -184,13 +192,32 @@ function readSingleAuthEntry(transactionXDR: string): {
+   credentialType: string;
+   entry: xdr.SorobanAuthorizationEntry;
+ } {
+-  const envelope = xdr.TransactionEnvelope.fromXDR(transactionXDR, "base64");
+-  const auth = envelope.v1().tx().operations()[0].body().invokeHostFunctionOp().auth();
++  const transaction = new Transaction(transactionXDR, StellarNetworks.TESTNET);
++  const operation = transaction.operations[0];
++  if (operation.type !== "invokeHostFunction") {
++    throw new Error(`Expected an invokeHostFunction operation, got ${operation.type}`);
++  }
++  const auth = operation.auth ?? [];
+ 
+   if (auth.length !== 1) {
+     throw new Error(`Expected exactly 1 auth entry, got ${auth.length}`);
+   }
+-  return { credentialType: auth[0].credentials().switch().name, entry: auth[0] };
++  return { credentialType: auth[0].credentials.type, entry: auth[0] };
++}
++
++/**
++ * Returns the address credentials of an entry on the legacy V1 arm.
++ *
++ * @param entry - The auth entry
++ * @returns Its `sorobanCredentialsAddress` credentials
++ */
++function v1AddressCredentialsOf(
++  entry: xdr.SorobanAuthorizationEntry,
++): xdr.SorobanAddressCredentials {
++  if (entry.credentials.type !== "sorobanCredentialsAddress") {
++    throw new Error(`Expected sorobanCredentialsAddress, got ${entry.credentials.type}`);
++  }
++  return entry.credentials.address;
+ }
+ 
+ /**
+@@ -202,9 +229,25 @@ function readSingleAuthEntry(transactionXDR: string): {
+  * @returns The re-serialized base64 transaction envelope XDR
+  */
+ function replaceAuthEntries(transactionXDR: string, auth: xdr.SorobanAuthorizationEntry[]): string {
+-  const envelope = xdr.TransactionEnvelope.fromXDR(transactionXDR, "base64");
+-  envelope.v1().tx().operations()[0].body().invokeHostFunctionOp().auth(auth);
+-  return envelope.toXDR("base64");
++  // sdk 17 XDR values are immutable, so rebuild the envelope with the same
++  // source, sequence, fee, bounds and Soroban data but replacement auth.
++  const transaction = new Transaction(transactionXDR, StellarNetworks.TESTNET);
++  const operation = transaction.operations[0];
++  if (operation.type !== "invokeHostFunction") {
++    throw new Error(`Expected an invokeHostFunction operation, got ${operation.type}`);
++  }
++  const envelope = transaction.toEnvelope();
++  const sorobanData =
++    envelope.type === "envelopeTypeTx" && envelope.v1.tx.ext.type === "sorobanData"
++      ? envelope.v1.tx.ext.sorobanData
++      : undefined;
++  return TransactionBuilder.cloneFrom(transaction, sorobanData ? { sorobanData } : {})
++    .clearOperations()
++    .addOperation(
++      Operation.invokeHostFunction({ func: operation.func, auth, source: operation.source }),
++    )
++    .build()
++    .toXdr();
+ }
+ 
+ /**
+@@ -388,7 +431,7 @@ describe.skipIf(missingEnvVars)("Stellar Integration Tests", () => {
+       expect(["sorobanCredentialsAddress", "sorobanCredentialsAddressV2"]).toContain(
+         credentialType,
+       );
+-      expect(getAddressCredentials(entry.credentials())).toBeDefined();
++      expect(getAddressCredentials(entry.credentials)).toBeDefined();
+ 
+       const verifyResponse = await server.verifyPayment(paymentPayload, accepted);
+       expect(verifyResponse.isValid).toBe(true);
+@@ -410,7 +453,7 @@ describe.skipIf(missingEnvVars)("Stellar Integration Tests", () => {
+       const { transaction } = paymentPayload.payload as ExactStellarPayloadV2;
+       const { entry } = readSingleAuthEntry(transaction);
+ 
+-      const credentials = getAddressCredentials(entry.credentials());
++      const credentials = getAddressCredentials(entry.credentials);
+       if (!credentials) {
+         throw new Error("Expected address credentials on the simulated auth entry");
+       }
+@@ -423,16 +466,16 @@ describe.skipIf(missingEnvVars)("Stellar Integration Tests", () => {
+         new xdr.SorobanAuthorizationEntry({
+           credentials: xdr.SorobanCredentials.sorobanCredentialsAddressV2(
+             new xdr.SorobanAddressCredentials({
+-              address: credentials.address(),
+-              nonce: credentials.nonce(),
++              address: credentials.address,
++              nonce: credentials.nonce,
+               signatureExpirationLedger: 0, // replaced by authorizeEntry
+               signature: xdr.ScVal.scvVoid(),
+             }),
+           ),
+-          rootInvocation: entry.rootInvocation(),
++          rootInvocation: entry.rootInvocation,
+         }),
+         Keypair.fromSecret(CLIENT_PRIVATE_KEY),
+-        credentials.signatureExpirationLedger(),
++        credentials.signatureExpirationLedger,
+         StellarNetworks.TESTNET,
+       );
+ 
+@@ -466,24 +509,24 @@ describe.skipIf(missingEnvVars)("Stellar Integration Tests", () => {
+       const { transaction } = paymentPayload.payload as ExactStellarPayloadV2;
+       const { entry } = readSingleAuthEntry(transaction);
+ 
+-      const credentials = getAddressCredentials(entry.credentials());
++      const credentials = getAddressCredentials(entry.credentials);
+       if (!credentials) {
+         throw new Error("Expected address credentials on the simulated auth entry");
+       }
+-      const expirationLedger = credentials.signatureExpirationLedger();
++      const expirationLedger = credentials.signatureExpirationLedger;
+ 
+       // Sign the legacy, non-address-bound preimage...
+       const v1Signed = await authorizeEntry(
+         new xdr.SorobanAuthorizationEntry({
+           credentials: xdr.SorobanCredentials.sorobanCredentialsAddress(
+             new xdr.SorobanAddressCredentials({
+-              address: credentials.address(),
+-              nonce: credentials.nonce(),
++              address: credentials.address,
++              nonce: credentials.nonce,
+               signatureExpirationLedger: 0, // replaced by authorizeEntry
+               signature: xdr.ScVal.scvVoid(),
+             }),
+           ),
+-          rootInvocation: entry.rootInvocation(),
++          rootInvocation: entry.rootInvocation,
+         }),
+         Keypair.fromSecret(CLIENT_PRIVATE_KEY),
+         expirationLedger,
+@@ -495,9 +538,9 @@ describe.skipIf(missingEnvVars)("Stellar Integration Tests", () => {
+       // it: enforce-mode simulation has to reject this.
+       const relabelledEntry = new xdr.SorobanAuthorizationEntry({
+         credentials: xdr.SorobanCredentials.sorobanCredentialsAddressV2(
+-          v1Signed.credentials().address(),
++          v1AddressCredentialsOf(v1Signed),
+         ),
+-        rootInvocation: v1Signed.rootInvocation(),
++        rootInvocation: v1Signed.rootInvocation,
+       });
+ 
+       const tamperedPayload: PaymentPayload = {
+diff --git a/typescript/packages/mechanisms/stellar/test/unit/client.test.ts b/typescript/packages/mechanisms/stellar/test/unit/client.test.ts
+index 4467c67..6c47f04 100644
+--- a/typescript/packages/mechanisms/stellar/test/unit/client.test.ts
++++ b/typescript/packages/mechanisms/stellar/test/unit/client.test.ts
+@@ -1,6 +1,7 @@
+-import { nativeToScVal } from "@stellar/stellar-sdk";
++import { nativeToScVal, xdr } from "@stellar/stellar-sdk";
+ import { beforeEach, describe, expect, it, vi } from "vitest";
+ import { STELLAR_PUBNET_CAIP2, STELLAR_TESTNET_CAIP2 } from "../../src/constants";
++import { findDefaultAsset } from "../../src/defaultAssets";
+ import { ExactStellarScheme } from "../../src/exact/client/scheme";
+ import * as stellarUtils from "../../src/utils";
+ import type { ClientStellarSigner } from "../../src/signer";
+@@ -61,7 +62,7 @@ describe("ExactStellarScheme", () => {
+     needsNonInvokerSigningBy: vi.fn(),
+     signAuthEntries: vi.fn(),
+     simulate: vi.fn(),
+-    built: { toXDR: vi.fn().mockReturnValue("mock-xdr") },
++    built: { toXdr: vi.fn().mockReturnValue("mock-xdr") },
+   };
+ 
+   const setupSuccessfulTransaction = () => {
+@@ -90,6 +91,14 @@ describe("ExactStellarScheme", () => {
+         new ExactStellarScheme(mockSigner, { url: "https://custom-rpc.example.com" }).scheme,
+       ).toBe("exact");
+     });
++
++    it("should expose findDefaultAsset for x402 core spend controls", () => {
++      const client = new ExactStellarScheme(mockSigner);
++      expect(client.findDefaultAsset).toBe(findDefaultAsset);
++      expect(client.findDefaultAsset(validPaymentReq.asset, STELLAR_TESTNET_CAIP2)).toEqual(
++        expect.objectContaining({ symbol: "USDC", decimals: 7 }),
++      );
++    });
+   });
+ 
+   describe("createPaymentPayload", () => {
+@@ -258,5 +267,91 @@ describe("ExactStellarScheme", () => {
+         });
+       },
+     );
++
++    describe("custom authorizeEntry (smart-account payers)", () => {
++      const contractAddress = "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA";
++      const signedEntry = {} as xdr.SorobanAuthorizationEntry;
++      const unsignedEntry = {} as xdr.SorobanAuthorizationEntry;
++
++      it("should pass a custom authorizeEntry to signAuthEntries and not call signAuthEntry", async () => {
++        const authorizeEntry = vi.fn().mockResolvedValue(signedEntry);
++        const customSigner: ClientStellarSigner = {
++          address: contractAddress,
++          signAuthEntry: vi.fn().mockResolvedValue({ signedAuthEntry: "unused" }),
++          authorizeEntry,
++        };
++        const client = new ExactStellarScheme(customSigner);
++        mockTransaction.needsNonInvokerSigningBy.mockReturnValueOnce([contractAddress]);
++        mockTransaction.needsNonInvokerSigningBy.mockReturnValueOnce([]);
++
++        const result = await client.createPaymentPayload(2, validPaymentReq);
++
++        expect(mockTransaction.signAuthEntries).toHaveBeenCalledTimes(1);
++        const options = mockTransaction.signAuthEntries.mock.calls[0][0];
++        expect(options).toEqual({
++          address: contractAddress,
++          expiration: 100012,
++          authorizeEntry: expect.any(Function),
++        });
++        expect(options).not.toHaveProperty("signAuthEntry");
++
++        // The wrapper the client hands to the SDK takes the SDK's 4-argument
++        // shape (entry, signer, validUntilLedgerSeq, networkPassphrase) and
++        // forwards (entry, validUntilLedgerSeq, networkPassphrase) to the signer.
++        const sdkSigningCallback = vi.fn();
++        await expect(
++          options.authorizeEntry(
++            unsignedEntry,
++            sdkSigningCallback,
++            100012,
++            "Test SDF Network ; September 2015",
++          ),
++        ).resolves.toBe(signedEntry);
++        expect(authorizeEntry).toHaveBeenCalledWith(
++          unsignedEntry,
++          100012,
++          "Test SDF Network ; September 2015",
++        );
++        expect(sdkSigningCallback).not.toHaveBeenCalled();
++        expect(customSigner.signAuthEntry).not.toHaveBeenCalled();
++
++        expect(mockTransaction.simulate).toHaveBeenCalled();
++        expect(result).toEqual({ x402Version: 2, payload: { transaction: "mock-xdr" } });
++      });
++
++      it("should keep using signAuthEntry when authorizeEntry is absent", async () => {
++        const client = new ExactStellarScheme(mockSigner);
++        setupSuccessfulTransaction();
++
++        await client.createPaymentPayload(2, validPaymentReq);
++
++        const options = mockTransaction.signAuthEntries.mock.calls[0][0];
++        expect(options).toEqual({
++          address: mockSignerAddress,
++          signAuthEntry: mockSigner.signAuthEntry,
++          expiration: 100012,
++        });
++        expect(options).not.toHaveProperty("authorizeEntry");
++      });
++
++      it("should surface errors thrown by the custom authorizeEntry", async () => {
++        const customSigner: ClientStellarSigner = {
++          address: contractAddress,
++          signAuthEntry: vi.fn(),
++          authorizeEntry: vi.fn().mockRejectedValue(new Error("passkey cancelled")),
++        };
++        const client = new ExactStellarScheme(customSigner);
++        mockTransaction.needsNonInvokerSigningBy.mockReturnValueOnce([contractAddress]);
++        mockTransaction.signAuthEntries.mockImplementationOnce(
++          async (opts: { authorizeEntry: (...args: unknown[]) => Promise<unknown> }) => {
++            await opts.authorizeEntry(unsignedEntry, undefined, 100012, "passphrase");
++          },
++        );
++
++        await expect(client.createPaymentPayload(2, validPaymentReq)).rejects.toThrow(
++          "passkey cancelled",
++        );
++      });
++    });
+   });
+ });
+diff --git a/typescript/packages/mechanisms/stellar/test/unit/facilitator-settle.test.ts b/typescript/packages/mechanisms/stellar/test/unit/facilitator-settle.test.ts
+index 3105ef0..f98f5e9 100644
+--- a/typescript/packages/mechanisms/stellar/test/unit/facilitator-settle.test.ts
++++ b/typescript/packages/mechanisms/stellar/test/unit/facilitator-settle.test.ts
+@@ -146,7 +146,7 @@ describe("ExactStellarScheme - Settle (randomly using 1-2 facilitator signers)",
+ 
+     // Mock _verify to pass for settle tests (verify is tested separately)
+     vi.spyOn(
+-      facilitator as unknown as { _verify: typeof facilitator.verify },
++      facilitator as unknown as { _verify: () => Promise<ReturnType<typeof mockVerifySuccess>> },
+       "_verify",
+     ).mockImplementation(async () => mockVerifySuccess());
+ 
+@@ -164,7 +164,7 @@ describe("ExactStellarScheme - Settle (randomly using 1-2 facilitator signers)",
+   describe("settlement failures", () => {
+     it("should return error when verify fails", async () => {
+       vi.spyOn(
+-        facilitator as unknown as { _verify: typeof facilitator.verify },
++        facilitator as unknown as { _verify: () => Promise<ReturnType<typeof mockVerifySuccess>> },
+         "_verify",
+       ).mockRestore();
+       // Use requirements with wrong amount to make verify fail
+@@ -337,7 +337,7 @@ describe("ExactStellarScheme - Settle (randomly using 1-2 facilitator signers)",
+     it("should set rebuilt transaction fee from simulation-derived resource fee plus inclusion buffer", async () => {
+       const minResourceFee = "100";
+       vi.spyOn(
+-        facilitator as unknown as { _verify: typeof facilitator.verify },
++        facilitator as unknown as { _verify: () => Promise<ReturnType<typeof mockVerifySuccess>> },
+         "_verify",
+       ).mockImplementation(async () => mockVerifySuccess(minResourceFee));
+ 
+@@ -354,7 +354,9 @@ describe("ExactStellarScheme - Settle (randomly using 1-2 facilitator signers)",
+         inclusionFeeStroops: 5_000,
+       });
+       vi.spyOn(
+-        highFeeFacilitator as unknown as { _verify: typeof highFeeFacilitator.verify },
++        highFeeFacilitator as unknown as {
++          _verify: () => Promise<ReturnType<typeof mockVerifySuccess>>;
++        },
+         "_verify",
+       ).mockImplementation(async () => mockVerifySuccess(minResourceFee));
+ 
+@@ -375,7 +377,9 @@ describe("ExactStellarScheme - Settle (randomly using 1-2 facilitator signers)",
+       });
+ 
+       vi.spyOn(
+-        customFacilitator as unknown as { _verify: typeof customFacilitator.verify },
++        customFacilitator as unknown as {
++          _verify: () => Promise<ReturnType<typeof mockVerifySuccess>>;
++        },
+         "_verify",
+       ).mockImplementation(async () => mockVerifySuccess());
+ 
+@@ -391,7 +395,9 @@ describe("ExactStellarScheme - Settle (randomly using 1-2 facilitator signers)",
+       const roundRobinFacilitator = new ExactStellarScheme(multiSigners);
+ 
+       vi.spyOn(
+-        roundRobinFacilitator as unknown as { _verify: typeof roundRobinFacilitator.verify },
++        roundRobinFacilitator as unknown as {
++          _verify: () => Promise<ReturnType<typeof mockVerifySuccess>>;
++        },
+         "_verify",
+       ).mockImplementation(async () => mockVerifySuccess());
+ 
+@@ -516,7 +522,7 @@ describe("ExactStellarScheme - Settle with feeBumpSigner", () => {
+       .spyOn(feeBumpSigner, "signTransaction")
+       .mockImplementation(async (txXdr, opts) => {
+         // Verify the input is a fee bump transaction
+-        const parsed = TransactionBuilder.fromXDR(
++        const parsed = TransactionBuilder.fromXdr(
+           txXdr,
+           opts?.networkPassphrase ?? StellarNetworks.TESTNET,
+         );
+@@ -529,7 +535,7 @@ describe("ExactStellarScheme - Settle with feeBumpSigner", () => {
+ 
+     const facilitator = new ExactStellarScheme([facilitatorSigner1], { feeBumpSigner });
+     vi.spyOn(
+-      facilitator as unknown as { _verify: typeof facilitator.verify },
++      facilitator as unknown as { _verify: () => Promise<ReturnType<typeof mockVerifySuccess>> },
+       "_verify",
+     ).mockImplementation(async () => mockVerifySuccess());
+ 
+@@ -558,7 +564,7 @@ describe("ExactStellarScheme - Settle with feeBumpSigner", () => {
+       inclusionFeeStroops: 5_000,
+     });
+     vi.spyOn(
+-      facilitator as unknown as { _verify: typeof facilitator.verify },
++      facilitator as unknown as { _verify: () => Promise<ReturnType<typeof mockVerifySuccess>> },
+       "_verify",
+     ).mockImplementation(async () => mockVerifySuccess());
+ 
+@@ -577,7 +583,7 @@ describe("ExactStellarScheme - Settle with feeBumpSigner", () => {
+ 
+     const facilitator = new ExactStellarScheme([facilitatorSigner1], { feeBumpSigner });
+     vi.spyOn(
+-      facilitator as unknown as { _verify: typeof facilitator.verify },
++      facilitator as unknown as { _verify: () => Promise<ReturnType<typeof mockVerifySuccess>> },
+       "_verify",
+     ).mockImplementation(async () => mockVerifySuccess());
+ 
+@@ -595,7 +601,7 @@ describe("ExactStellarScheme - Settle with feeBumpSigner", () => {
+   it("should not use fee bump when feeBumpSigner is not set", async () => {
+     const facilitator = new ExactStellarScheme([facilitatorSigner1]);
+     vi.spyOn(
+-      facilitator as unknown as { _verify: typeof facilitator.verify },
++      facilitator as unknown as { _verify: () => Promise<ReturnType<typeof mockVerifySuccess>> },
+       "_verify",
+     ).mockImplementation(async () => mockVerifySuccess());
+ 
+@@ -616,7 +622,7 @@ describe("ExactStellarScheme - Settle with feeBumpSigner", () => {
+       feeBumpSigner,
+     });
+     vi.spyOn(
+-      facilitator as unknown as { _verify: typeof facilitator.verify },
++      facilitator as unknown as { _verify: () => Promise<ReturnType<typeof mockVerifySuccess>> },
+       "_verify",
+     ).mockImplementation(async () => mockVerifySuccess());
+ 
+diff --git a/typescript/packages/mechanisms/stellar/test/unit/facilitator-verify.test.ts b/typescript/packages/mechanisms/stellar/test/unit/facilitator-verify.test.ts
+index 8b90ae3..921e1d4 100644
+--- a/typescript/packages/mechanisms/stellar/test/unit/facilitator-verify.test.ts
++++ b/typescript/packages/mechanisms/stellar/test/unit/facilitator-verify.test.ts
+@@ -5,6 +5,7 @@ import {
+   SorobanDataBuilder,
+   authorizeEntry,
+   buildAuthorizationEntryPreimage,
++  buildWithDelegatesEntry,
+   rpc,
+   Transaction,
+   TransactionBuilder,
+@@ -50,7 +51,7 @@ function createMockContractEvent({
+   to: string;
+   amount: bigint;
+   fnName?: string;
+-  contractId?: xdr.Hash | null;
++  contractId?: xdr.ContractId | null;
+ }): xdr.DiagnosticEvent {
+   // symbol for the function name
+   const transferSymbol = xdr.ScVal.scvSymbol(fnName);
+@@ -71,8 +72,8 @@ function createMockContractEvent({
+ 
+   const amountScVal = xdr.ScVal.scvI128(
+     new xdr.Int128Parts({
+-      lo: xdr.Uint64.fromString(amount.toString()),
+-      hi: xdr.Int64.fromString("0"),
++      lo: BigInt.asUintN(64, amount),
++      hi: amount >> 64n,
+     }),
+   );
+ 
+@@ -82,7 +83,7 @@ function createMockContractEvent({
+   });
+   return createMockDiagnosticEvent(
+     contractEventV0,
+-    xdr.ContractEventType.contract(),
++    xdr.ContractEventType.contract,
+     contractId ?? null,
+   );
+ }
+@@ -93,7 +94,7 @@ function createMockContractEvent({
+ function createMockSystemEvent(): xdr.DiagnosticEvent {
+   return createMockDiagnosticEvent(
+     new xdr.ContractEventV0({ topics: [], data: xdr.ScVal.scvVoid() }),
+-    xdr.ContractEventType.system(),
++    xdr.ContractEventType.system,
+   );
+ }
+ 
+@@ -109,19 +110,14 @@ function createMockSystemEvent(): xdr.DiagnosticEvent {
+  */
+ function createMockDiagnosticEvent(
+   v0: xdr.ContractEventV0,
+-  eventType: ReturnType<typeof xdr.ContractEventType.contract> = xdr.ContractEventType.contract(),
+-  contractId: xdr.Hash | null = null,
++  eventType: xdr.ContractEventType = xdr.ContractEventType.contract,
++  contractId: xdr.ContractId | null = null,
+ ): xdr.DiagnosticEvent {
+-  const eventBodyXdr = xdr.ContractEventBody.toXDR(
+-    xdr.ContractEventBody.fromXDR(
+-      Buffer.concat([Buffer.from([0, 0, 0, 0]), xdr.ContractEventV0.toXDR(v0)]),
+-    ),
+-  );
+   const contractEvent = new xdr.ContractEvent({
+-    ext: xdr.ExtensionPoint.fromXDR(Buffer.from([0, 0, 0, 0])),
++    ext: xdr.ExtensionPoint.v0(),
+     contractId,
+     type: eventType,
+-    body: xdr.ContractEventBody.fromXDR(eventBodyXdr),
++    body: xdr.ContractEventBody.v0(v0),
+   });
+   return new xdr.DiagnosticEvent({
+     inSuccessfulContractCall: true,
+@@ -129,6 +125,34 @@ function createMockDiagnosticEvent(
+   });
+ }
+ 
++/**
++ * Returns the `sorobanCredentialsAddress` credentials of an auth entry.
++ *
++ * @param entry - The auth entry (must carry legacy V1 address credentials)
++ * @returns The address credentials
++ */
++function addressCredentialsOf(entry: xdr.SorobanAuthorizationEntry): xdr.SorobanAddressCredentials {
++  const credentials = entry.credentials;
++  if (credentials.type !== "sorobanCredentialsAddress") {
++    throw new Error(`expected sorobanCredentialsAddress, got ${credentials.type}`);
++  }
++  return credentials.address;
++}
++
++/**
++ * Returns the contract id hash of a C-address.
++ *
++ * @param address - A contract strkey
++ * @returns The 32-byte contract id
++ */
++function contractIdOf(address: string): xdr.ContractId {
++  const scAddress = new Address(address).toScAddress();
++  if (scAddress.type !== "scAddressTypeContract") {
++    throw new Error(`expected a contract address, got ${scAddress.type}`);
++  }
++  return scAddress.contractId;
++}
++
+ vi.mock("../../src/utils", async () => {
+   const actual = await vi.importActual<typeof stellarUtils>("../../src/utils");
+   return {
+@@ -219,12 +243,18 @@ describe("ExactStellarScheme#Verify (randomly using 1-2 facilitator signers)", (
+     };
+ 
+     stellarPayload = validPayload.payload as { transaction: string };
+-    const txEnvelope = xdr.TransactionEnvelope.fromXDR(stellarPayload.transaction, "base64");
++    const txEnvelope = xdr.TransactionEnvelope.fromXdr(stellarPayload.transaction, "base64");
+     baseTransaction = new Transaction(stellarPayload.transaction, networkPassphrase);
+-    baseSorobanData = txEnvelope.v1()?.tx()?.ext()?.sorobanData() || undefined;
++    baseSorobanData =
++      txEnvelope.type === "envelopeTypeTx" && txEnvelope.v1.tx.ext.type === "sorobanData"
++        ? txEnvelope.v1.tx.ext.sorobanData
++        : undefined;
+     baseOperation = baseTransaction.operations[0] as Operation.InvokeHostFunction;
+     baseFunc = baseOperation.func;
+-    baseInvokeContractArgs = baseFunc.invokeContract();
++    if (baseFunc.type !== "hostFunctionTypeInvokeContract") {
++      throw new Error("expected an invokeContract host function in the fixture");
++    }
++    baseInvokeContractArgs = baseFunc.invokeContract;
+   });
+ 
+   /**
+@@ -246,7 +276,7 @@ describe("ExactStellarScheme#Verify (randomly using 1-2 facilitator signers)", (
+       .build();
+     return {
+       ...validPayload,
+-      payload: { transaction: modifiedTx.toXDR() },
++      payload: { transaction: modifiedTx.toXdr() },
+     };
+   }
+ 
+@@ -263,7 +293,7 @@ describe("ExactStellarScheme#Verify (randomly using 1-2 facilitator signers)", (
+       maxTransactionFeeStroops: 1_000_000,
+     });
+ 
+-    const expectedAssetHash = new Address(ASSET).toScAddress().contractId();
++    const expectedAssetHash = contractIdOf(ASSET);
+     const defaultTransferEvent = createMockContractEvent({
+       from: CLIENT_PUBLIC,
+       to: TRANSACTION_RECIPIENT,
+@@ -400,7 +430,7 @@ describe("ExactStellarScheme#Verify (randomly using 1-2 facilitator signers)", (
+ 
+       const modifiedStellarPayload: PaymentPayload = {
+         ...validPayload,
+-        payload: { transaction: modifiedTx.toXDR() },
++        payload: { transaction: modifiedTx.toXdr() },
+       };
+ 
+       const result = await facilitator.verify(modifiedStellarPayload, validRequirements);
+@@ -426,9 +456,9 @@ describe("ExactStellarScheme#Verify (randomly using 1-2 facilitator signers)", (
+ 
+     it("should reject wrong contract function name", async () => {
+       const wrongFuncArgs = new xdr.InvokeContractArgs({
+-        contractAddress: baseInvokeContractArgs.contractAddress(),
++        contractAddress: baseInvokeContractArgs.contractAddress,
+         functionName: "mint", // ❌ function name MUST be "transfer"
+-        args: baseInvokeContractArgs.args(),
++        args: baseInvokeContractArgs.args,
+       });
+       const modifiedFunc = xdr.HostFunction.hostFunctionTypeInvokeContract(wrongFuncArgs);
+       const modifiedOperation = Operation.invokeHostFunction({
+@@ -472,7 +502,7 @@ describe("ExactStellarScheme#Verify (randomly using 1-2 facilitator signers)", (
+           throw new Error("Missing sorobanData or auth in test transaction");
+         }
+ 
+-        const originalArgs = baseInvokeContractArgs.args();
++        const originalArgs = baseInvokeContractArgs.args;
+         const facilitatorKeypair = Keypair.fromPublicKey(facilitatorAddress);
+         const facilitatorScAddress = xdr.ScVal.scvAddress(
+           xdr.ScAddress.scAddressTypeAccount(
+@@ -481,8 +511,8 @@ describe("ExactStellarScheme#Verify (randomly using 1-2 facilitator signers)", (
+         );
+ 
+         const modifiedInvokeContractArgs = new xdr.InvokeContractArgs({
+-          contractAddress: baseInvokeContractArgs.contractAddress(),
+-          functionName: baseInvokeContractArgs.functionName(),
++          contractAddress: baseInvokeContractArgs.contractAddress,
++          functionName: baseInvokeContractArgs.functionName,
+           args: [
+             facilitatorScAddress, // ❌ facilitator CANNOT be the payer
+             originalArgs[1],
+@@ -518,7 +548,7 @@ describe("ExactStellarScheme#Verify (randomly using 1-2 facilitator signers)", (
+           throw new Error("Missing sorobanData or auth in test transaction");
+         }
+ 
+-        const originalArgs = baseInvokeContractArgs.args();
++        const originalArgs = baseInvokeContractArgs.args;
+         const feeBumpKeypair = Keypair.fromPublicKey(feeBumpSigner.address);
+         const feeBumpScAddress = xdr.ScVal.scvAddress(
+           xdr.ScAddress.scAddressTypeAccount(
+@@ -527,8 +557,8 @@ describe("ExactStellarScheme#Verify (randomly using 1-2 facilitator signers)", (
+         );
+ 
+         const modifiedInvokeContractArgs = new xdr.InvokeContractArgs({
+-          contractAddress: baseInvokeContractArgs.contractAddress(),
+-          functionName: baseInvokeContractArgs.functionName(),
++          contractAddress: baseInvokeContractArgs.contractAddress,
++          functionName: baseInvokeContractArgs.functionName,
+           args: [
+             feeBumpScAddress, // ❌ feeBumpSigner is facilitator-controlled too and must not be the payer
+             originalArgs[1],
+@@ -570,18 +600,18 @@ describe("ExactStellarScheme#Verify (randomly using 1-2 facilitator signers)", (
+         }
+ 
+         const originalAuth = baseOperation.auth[0];
+-        const originalCreds = originalAuth.credentials().address();
++        const originalCreds = addressCredentialsOf(originalAuth);
+ 
+         const unsignedCreds = new xdr.SorobanAddressCredentials({
+-          address: originalCreds.address(),
+-          nonce: originalCreds.nonce(),
+-          signatureExpirationLedger: originalCreds.signatureExpirationLedger(),
++          address: originalCreds.address,
++          nonce: originalCreds.nonce,
++          signatureExpirationLedger: originalCreds.signatureExpirationLedger,
+           signature: xdr.ScVal.scvVoid(), // ❌ payer signature is missing
+         });
+ 
+         const authWithoutSignature = new xdr.SorobanAuthorizationEntry({
+           credentials: xdr.SorobanCredentials.sorobanCredentialsAddress(unsignedCreds),
+-          rootInvocation: originalAuth.rootInvocation(),
++          rootInvocation: originalAuth.rootInvocation,
+         });
+ 
+         const modifiedOperation = Operation.invokeHostFunction({
+@@ -602,7 +632,7 @@ describe("ExactStellarScheme#Verify (randomly using 1-2 facilitator signers)", (
+         }
+ 
+         const originalAuth = baseOperation.auth[0];
+-        const originalCreds = originalAuth.credentials().address();
++        const originalCreds = addressCredentialsOf(originalAuth);
+ 
+         const otherKeypair = Keypair.random();
+         const otherAddressScVal = xdr.ScAddress.scAddressTypeAccount(
+@@ -611,14 +641,14 @@ describe("ExactStellarScheme#Verify (randomly using 1-2 facilitator signers)", (
+ 
+         const pendingCreds = new xdr.SorobanAddressCredentials({
+           address: otherAddressScVal,
+-          nonce: originalCreds.nonce(),
+-          signatureExpirationLedger: originalCreds.signatureExpirationLedger(),
++          nonce: originalCreds.nonce,
++          signatureExpirationLedger: originalCreds.signatureExpirationLedger,
+           signature: xdr.ScVal.scvVoid(),
+         });
+ 
+         const pendingAuth = new xdr.SorobanAuthorizationEntry({
+           credentials: xdr.SorobanCredentials.sorobanCredentialsAddress(pendingCreds),
+-          rootInvocation: originalAuth.rootInvocation(),
++          rootInvocation: originalAuth.rootInvocation,
+         });
+ 
+         const modifiedOperation = Operation.invokeHostFunction({
+@@ -641,19 +671,19 @@ describe("ExactStellarScheme#Verify (randomly using 1-2 facilitator signers)", (
+         }
+ 
+         const originalAuth = baseOperation.auth[0];
+-        const originalCreds = originalAuth.credentials().address();
++        const originalCreds = addressCredentialsOf(originalAuth);
+         const farFuture = (txSignatureExpiration + 10_000).toString();
+ 
+         const farFutureCreds = new xdr.SorobanAddressCredentials({
+-          address: originalCreds.address(),
+-          nonce: originalCreds.nonce(),
++          address: originalCreds.address,
++          nonce: originalCreds.nonce,
+           signatureExpirationLedger: Number(farFuture), // ❌ Signature expiration too far
+-          signature: originalCreds.signature(),
++          signature: originalCreds.signature,
+         });
+ 
+         const authWithFarExpiration = new xdr.SorobanAuthorizationEntry({
+           credentials: xdr.SorobanCredentials.sorobanCredentialsAddress(farFutureCreds),
+-          rootInvocation: originalAuth.rootInvocation(),
++          rootInvocation: originalAuth.rootInvocation,
+         });
+ 
+         const modifiedOperation = Operation.invokeHostFunction({
+@@ -674,13 +704,11 @@ describe("ExactStellarScheme#Verify (randomly using 1-2 facilitator signers)", (
+             throw new Error("Missing sorobanData in test transaction");
+           }
+ 
+-          const sourceAccountAuth = xdr.SorobanAuthorizationEntry.fromXDR(
+-            xdr.SorobanAuthorizationEntry.toXDR(
+-              new xdr.SorobanAuthorizationEntry({
+-                credentials: xdr.SorobanCredentials.sorobanCredentialsSourceAccount(), // ❌ not sorobanCredentialsAddress
+-                rootInvocation: baseOperation.auth![0].rootInvocation(),
+-              }),
+-            ),
++          const sourceAccountAuth = xdr.SorobanAuthorizationEntry.fromXdr(
++            new xdr.SorobanAuthorizationEntry({
++              credentials: xdr.SorobanCredentials.sorobanCredentialsSourceAccount(), // ❌ not sorobanCredentialsAddress
++              rootInvocation: baseOperation.auth![0].rootInvocation,
++            }).toXdr(),
+           );
+ 
+           const modifiedOperation = Operation.invokeHostFunction({
+@@ -707,19 +735,19 @@ describe("ExactStellarScheme#Verify (randomly using 1-2 facilitator signers)", (
+           // than relabelling the V1 fixture's signature, so the payload matches
+           // what an upgraded network actually accepts.
+           const originalAuth = baseOperation.auth[0];
+-          const originalCredentials = originalAuth.credentials().address();
+-          const expirationLedger = originalCredentials.signatureExpirationLedger();
++          const originalCredentials = addressCredentialsOf(originalAuth);
++          const expirationLedger = originalCredentials.signatureExpirationLedger;
+ 
+           const unsignedV2Auth = new xdr.SorobanAuthorizationEntry({
+             credentials: xdr.SorobanCredentials.sorobanCredentialsAddressV2(
+               new xdr.SorobanAddressCredentials({
+-                address: originalCredentials.address(),
+-                nonce: originalCredentials.nonce(),
++                address: originalCredentials.address,
++                nonce: originalCredentials.nonce,
+                 signatureExpirationLedger: 0, // replaced by authorizeEntry
+                 signature: xdr.ScVal.scvVoid(),
+               }),
+             ),
+-            rootInvocation: originalAuth.rootInvocation(),
++            rootInvocation: originalAuth.rootInvocation,
+           });
+           const v2Auth = await authorizeEntry(
+             unsignedV2Auth,
+@@ -734,7 +762,7 @@ describe("ExactStellarScheme#Verify (randomly using 1-2 facilitator signers)", (
+             expirationLedger,
+             networkPassphrase,
+           );
+-          expect(v2Preimage.switch().name).toBe("envelopeTypeSorobanAuthorizationWithAddress");
++          expect(v2Preimage.type).toBe("envelopeTypeSorobanAuthorizationWithAddress");
+ 
+           const modifiedOperation = Operation.invokeHostFunction({
+             ...baseOperation,
+@@ -752,18 +780,18 @@ describe("ExactStellarScheme#Verify (randomly using 1-2 facilitator signers)", (
+           }
+ 
+           const originalAuth = baseOperation.auth[0];
+-          const originalCredentials = originalAuth.credentials().address();
++          const originalCredentials = addressCredentialsOf(originalAuth);
+ 
+           const unsignedV2Auth = new xdr.SorobanAuthorizationEntry({
+             credentials: xdr.SorobanCredentials.sorobanCredentialsAddressV2(
+               new xdr.SorobanAddressCredentials({
+-                address: originalCredentials.address(),
+-                nonce: originalCredentials.nonce(),
+-                signatureExpirationLedger: originalCredentials.signatureExpirationLedger(),
++                address: originalCredentials.address,
++                nonce: originalCredentials.nonce,
++                signatureExpirationLedger: originalCredentials.signatureExpirationLedger,
+                 signature: xdr.ScVal.scvVoid(), // ❌ never signed
+               }),
+             ),
+-            rootInvocation: originalAuth.rootInvocation(),
++            rootInvocation: originalAuth.rootInvocation,
+           });
+ 
+           const modifiedOperation = Operation.invokeHostFunction({
+@@ -779,33 +807,233 @@ describe("ExactStellarScheme#Verify (randomly using 1-2 facilitator signers)", (
+           );
+         });
+ 
+-        it("should reject delegated (addressWithDelegates) credentials", async () => {
+-          if (!baseSorobanData || !baseOperation.auth || baseOperation.auth.length === 0) {
+-            throw new Error("Missing sorobanData or auth in test transaction");
++        describe("CAP-71-01 address-with-delegates credentials", () => {
++          const delegateA = Keypair.random();
++          const delegateB = Keypair.random();
++          const nestedDelegate = Keypair.random();
++
++          /**
++           * Wraps the fixture's payer credentials in the delegates arm with the
++           * given delegate tree (all signatures void, top-level void).
++           *
++           * @param delegates - The delegate tree to attach
++           * @param validUntilLedgerSeq - The top-level signature expiration ledger
++           * @returns An unsigned address-with-delegates entry
++           */
++          function buildUnsignedDelegatesAuth(
++            delegates: { address: string; nestedDelegates?: { address: string }[] }[],
++            validUntilLedgerSeq?: number,
++          ): xdr.SorobanAuthorizationEntry {
++            const originalAuth = baseOperation.auth![0];
++            const originalCredentials = addressCredentialsOf(originalAuth);
++            const unsignedV2Auth = new xdr.SorobanAuthorizationEntry({
++              credentials: xdr.SorobanCredentials.sorobanCredentialsAddressV2(
++                new xdr.SorobanAddressCredentials({
++                  address: originalCredentials.address,
++                  nonce: originalCredentials.nonce,
++                  signatureExpirationLedger: 0,
++                  signature: xdr.ScVal.scvVoid(),
++                }),
++              ),
++              rootInvocation: originalAuth.rootInvocation,
++            });
++            return buildWithDelegatesEntry({
++              entry: unsignedV2Auth,
++              validUntilLedgerSeq:
++                validUntilLedgerSeq ?? originalCredentials.signatureExpirationLedger,
++              delegates,
++            });
+           }
+ 
+-          const originalAuth = baseOperation.auth[0];
+-          const delegatedAuth = new xdr.SorobanAuthorizationEntry({
+-            credentials: xdr.SorobanCredentials.sorobanCredentialsAddressWithDelegates(
+-              new xdr.SorobanAddressCredentialsWithDelegates({
+-                addressCredentials: originalAuth.credentials().address(),
+-                delegates: [],
+-              }),
+-            ),
+-            rootInvocation: originalAuth.rootInvocation(),
++          /**
++           * Signs the given delegate nodes of an entry (each over the shared,
++           * top-level-bound CAP-71-01 preimage).
++           *
++           * @param entry - The entry to sign
++           * @param signers - The delegate keypairs that should sign
++           * @returns The entry with those delegate signatures filled in
++           */
++          async function signDelegates(
++            entry: xdr.SorobanAuthorizationEntry,
++            signers: Keypair[],
++          ): Promise<xdr.SorobanAuthorizationEntry> {
++            let signed = entry;
++            const expirationLedger = addressCredentialsOf(
++              baseOperation.auth![0],
++            ).signatureExpirationLedger;
++            for (const signer of signers) {
++              signed = await authorizeEntry(
++                signed,
++                signer,
++                expirationLedger,
++                networkPassphrase,
++                signer.publicKey(),
++              );
++            }
++            return signed;
++          }
++
++          it("should accept an entry whose top-level signature is void but every delegate signed", async () => {
++            const unsigned = buildUnsignedDelegatesAuth([
++              { address: delegateA.publicKey() },
++              {
++                address: delegateB.publicKey(),
++                nestedDelegates: [{ address: nestedDelegate.publicKey() }],
++              },
++            ]);
++            const delegatedAuth = await signDelegates(unsigned, [
++              delegateA,
++              delegateB,
++              nestedDelegate,
++            ]);
++            expect(delegatedAuth.credentials.type).toBe("sorobanCredentialsAddressWithDelegates");
++            // The payer (top-level) never signed; only its delegates did.
++            expect(
++              delegatedAuth.credentials.type === "sorobanCredentialsAddressWithDelegates" &&
++                delegatedAuth.credentials.addressWithDelegates.addressCredentials.signature.type,
++            ).toBe("scvVoid");
++
++            const modifiedOperation = Operation.invokeHostFunction({
++              ...baseOperation,
++              auth: [delegatedAuth],
++            });
++            const modifiedStellarPayload = buildStellarPayloadFromOp(modifiedOperation);
++
++            const result = await facilitator.verify(modifiedStellarPayload, validRequirements);
++            expect(result).toEqual(validVerifyResponse(CLIENT_PUBLIC));
+           });
+ 
+-          const modifiedOperation = Operation.invokeHostFunction({
+-            ...baseOperation,
+-            auth: [delegatedAuth],
++          it("should accept a delegates entry signed by the top-level account itself", async () => {
++            const signedByPayer = await authorizeEntry(
++              buildUnsignedDelegatesAuth([{ address: delegateA.publicKey() }]),
++              Keypair.fromSecret(CLIENT_SECRET),
++              addressCredentialsOf(baseOperation.auth![0]).signatureExpirationLedger,
++              networkPassphrase,
++            );
++            const modifiedOperation = Operation.invokeHostFunction({
++              ...baseOperation,
++              auth: [signedByPayer],
++            });
++            const result = await facilitator.verify(
++              buildStellarPayloadFromOp(modifiedOperation),
++              validRequirements,
++            );
++            expect(result).toEqual(validVerifyResponse(CLIENT_PUBLIC));
+           });
+-          const modifiedStellarPayload = buildStellarPayloadFromOp(modifiedOperation);
+ 
+-          const result = await facilitator.verify(modifiedStellarPayload, validRequirements);
+-          expect(result.isValid).toBe(false);
+-          expect(result.invalidReason).toBe(
+-            "invalid_exact_stellar_payload_unsupported_credential_type",
+-          );
++          it("should reject as missing payer signature when a (nested) delegate has not signed", async () => {
++            const unsigned = buildUnsignedDelegatesAuth([
++              { address: delegateA.publicKey() },
++              {
++                address: delegateB.publicKey(),
++                nestedDelegates: [{ address: nestedDelegate.publicKey() }],
++              },
++            ]);
++            // ❌ nestedDelegate never signs
++            const partiallySigned = await signDelegates(unsigned, [delegateA, delegateB]);
++
++            const modifiedOperation = Operation.invokeHostFunction({
++              ...baseOperation,
++              auth: [partiallySigned],
++            });
++            const result = await facilitator.verify(
++              buildStellarPayloadFromOp(modifiedOperation),
++              validRequirements,
++            );
++            expect(result.isValid).toBe(false);
++            expect(result.invalidReason).toBe(
++              "invalid_exact_stellar_payload_missing_payer_signature",
++            );
++            expect(result.payer).toBe(CLIENT_PUBLIC);
++          });
++
++          it("should reject a delegates entry with no delegates and no top-level signature", async () => {
++            const modifiedOperation = Operation.invokeHostFunction({
++              ...baseOperation,
++              auth: [buildUnsignedDelegatesAuth([])], // ❌ nobody signed
++            });
++            const result = await facilitator.verify(
++              buildStellarPayloadFromOp(modifiedOperation),
++              validRequirements,
++            );
++            expect(result.isValid).toBe(false);
++            expect(result.invalidReason).toBe(
++              "invalid_exact_stellar_payload_missing_payer_signature",
++            );
++          });
++
++          it("should reject when the facilitator appears as a delegate", async () => {
++            const facilitatorKeypair = Keypair.fromSecret(
++              "SCKB3ECHCPVM4HJPNCQWTQWJJ5XRL6UNKLTTCIH4B7TB22NKJ5GUFMIV",
++            );
++            expect(facilitatorKeypair.publicKey()).toBe(facilitatorSigner1.address);
++            const unsigned = buildUnsignedDelegatesAuth([
++              { address: delegateA.publicKey() },
++              { address: facilitatorKeypair.publicKey() }, // ❌ facilitator must not be a delegate
++            ]);
++            const delegatedAuth = await signDelegates(unsigned, [delegateA, facilitatorKeypair]);
++
++            const modifiedOperation = Operation.invokeHostFunction({
++              ...baseOperation,
++              auth: [delegatedAuth],
++            });
++            const result = await facilitator.verify(
++              buildStellarPayloadFromOp(modifiedOperation),
++              validRequirements,
++            );
++            expect(result.isValid).toBe(false);
++            expect(result.invalidReason).toBe("invalid_exact_stellar_payload_facilitator_in_auth");
++          });
++
++          it("should reject when the facilitator appears as a nested delegate", async () => {
++            const facilitatorKeypair = Keypair.fromSecret(
++              "SCKB3ECHCPVM4HJPNCQWTQWJJ5XRL6UNKLTTCIH4B7TB22NKJ5GUFMIV",
++            );
++            const unsigned = buildUnsignedDelegatesAuth([
++              {
++                address: delegateA.publicKey(),
++                nestedDelegates: [{ address: facilitatorKeypair.publicKey() }], // ❌ nested facilitator
++              },
++            ]);
++            const delegatedAuth = await signDelegates(unsigned, [delegateA, facilitatorKeypair]);
++
++            const modifiedOperation = Operation.invokeHostFunction({
++              ...baseOperation,
++              auth: [delegatedAuth],
++            });
++            const result = await facilitator.verify(
++              buildStellarPayloadFromOp(modifiedOperation),
++              validRequirements,
++            );
++            expect(result.isValid).toBe(false);
++            expect(result.invalidReason).toBe("invalid_exact_stellar_payload_facilitator_in_auth");
++          });
++
++          it("should check the top-level signatureExpirationLedger of a delegates entry", async () => {
++            const unsigned = buildUnsignedDelegatesAuth(
++              [{ address: delegateA.publicKey() }],
++              txSignatureExpiration + 10_000, // ❌ too far in the future
++            );
++            const delegatedAuth = await authorizeEntry(
++              unsigned,
++              delegateA,
++              txSignatureExpiration + 10_000,
++              networkPassphrase,
++              delegateA.publicKey(),
++            );
++
++            const modifiedOperation = Operation.invokeHostFunction({
++              ...baseOperation,
++              auth: [delegatedAuth],
++            });
++            const result = await facilitator.verify(
++              buildStellarPayloadFromOp(modifiedOperation),
++              validRequirements,
++            );
++            expect(result.isValid).toBe(false);
++            expect(result.invalidReason).toBe("invalid_exact_stellar_signature_expiration_too_far");
++            expect(result.payer).toBe(CLIENT_PUBLIC);
++          });
+         });
+       });
+ 
+@@ -816,20 +1044,20 @@ describe("ExactStellarScheme#Verify (randomly using 1-2 facilitator signers)", (
+           }
+ 
+           const originalAuth = baseOperation.auth[0];
+-          const originalRootInvocation = originalAuth.rootInvocation();
++          const originalRootInvocation = originalAuth.rootInvocation;
+ 
+           const subInvocation = new xdr.SorobanAuthorizedInvocation({
+-            function: originalRootInvocation.function(),
++            function: originalRootInvocation.function,
+             subInvocations: [],
+           });
+ 
+           const rootWithSubInvocations = new xdr.SorobanAuthorizedInvocation({
+-            function: originalRootInvocation.function(),
++            function: originalRootInvocation.function,
+             subInvocations: [subInvocation], // ❌ sub-invocations not allowed
+           });
+ 
+           const authWithSubInvocations = new xdr.SorobanAuthorizationEntry({
+-            credentials: originalAuth.credentials(),
++            credentials: originalAuth.credentials,
+             rootInvocation: rootWithSubInvocations,
+           });
+ 
+@@ -853,7 +1081,7 @@ describe("ExactStellarScheme#Verify (randomly using 1-2 facilitator signers)", (
+ 
+           const facilitatorAddress = facilitatorSigner1.address;
+           const originalAuth = baseOperation.auth[0];
+-          const originalAddressCredentials = originalAuth.credentials().address();
++          const originalAddressCredentials = addressCredentialsOf(originalAuth);
+ 
+           const facilitatorKeypair = Keypair.fromPublicKey(facilitatorAddress);
+           const facilitatorAddressScVal = xdr.ScAddress.scAddressTypeAccount(
+@@ -862,14 +1090,14 @@ describe("ExactStellarScheme#Verify (randomly using 1-2 facilitator signers)", (
+ 
+           const facilitatorCredentials = new xdr.SorobanAddressCredentials({
+             address: facilitatorAddressScVal, // ❌ facilitator address in auth entry
+-            nonce: originalAddressCredentials.nonce(),
+-            signatureExpirationLedger: originalAddressCredentials.signatureExpirationLedger(),
+-            signature: originalAddressCredentials.signature(),
++            nonce: originalAddressCredentials.nonce,
++            signatureExpirationLedger: originalAddressCredentials.signatureExpirationLedger,
++            signature: originalAddressCredentials.signature,
+           });
+ 
+           const authWithFacilitator = new xdr.SorobanAuthorizationEntry({
+             credentials: xdr.SorobanCredentials.sorobanCredentialsAddress(facilitatorCredentials),
+-            rootInvocation: originalAuth.rootInvocation(),
++            rootInvocation: originalAuth.rootInvocation,
+           });
+ 
+           const modifiedOperation = Operation.invokeHostFunction({
+@@ -927,7 +1155,7 @@ describe("ExactStellarScheme#Verify (randomly using 1-2 facilitator signers)", (
+           const modifiedStellarPayload: PaymentPayload = {
+             ...validPayload,
+             payload: {
+-              transaction: modifiedTx.toXDR(),
++              transaction: modifiedTx.toXdr(),
+             },
+           };
+ 
+@@ -954,7 +1182,7 @@ describe("ExactStellarScheme#Verify (randomly using 1-2 facilitator signers)", (
+ 
+     // Event-based balance change validation
+     describe("simulation event validation", () => {
+-      const expectedAssetHash = () => new Address(ASSET).toScAddress().contractId();
++      const expectedAssetHash = () => contractIdOf(ASSET);
+ 
+       it("should reject when simulation shows multiple transfer events", async () => {
+         const mockTransferEvent1 = createMockContractEvent({
+@@ -1090,7 +1318,7 @@ describe("ExactStellarScheme#Verify (randomly using 1-2 facilitator signers)", (
+           from: CLIENT_PUBLIC,
+           to: TRANSACTION_RECIPIENT,
+           amount: BigInt(10000),
+-          contractId: new Address(wrongAsset).toScAddress().contractId(),
++          contractId: contractIdOf(wrongAsset),
+         });
+ 
+         vi.mocked(mockServer.simulateTransaction).mockResolvedValueOnce({
+diff --git a/typescript/packages/mechanisms/stellar/test/unit/shared.test.ts b/typescript/packages/mechanisms/stellar/test/unit/shared.test.ts
+index 3f71233..5d9b2c1 100644
+--- a/typescript/packages/mechanisms/stellar/test/unit/shared.test.ts
++++ b/typescript/packages/mechanisms/stellar/test/unit/shared.test.ts
+@@ -7,6 +7,7 @@ import {
+   TransactionBuilder,
+   authorizeEntry,
+   buildAuthorizationEntryPreimage,
++  buildWithDelegatesEntry,
+   hash,
+   nativeToScVal,
+   xdr,
+@@ -19,9 +20,13 @@ import { beforeEach, describe, it, expect, vi } from "vitest";
+ import { STELLAR_TESTNET_CAIP2 } from "../../src/constants";
+ import { ExactStellarScheme } from "../../src/exact/client/scheme";
+ import {
++  areAllDelegatesSigned,
++  collectDelegateAddresses,
+   gatherAuthEntrySignatureStatus,
+   getAddressCredentials,
++  getDelegateSignatures,
+   handleSimulationResult,
++  isAuthEntrySigned,
+ } from "../../src/shared";
+ import { createEd25519Signer } from "../../src/signer";
+ import * as stellarUtils from "../../src/utils";
+@@ -110,7 +115,7 @@ describe("Stellar Shared Utilities", () => {
+       address: xdr.ScAddress.scAddressTypeAccount(
+         xdr.PublicKey.publicKeyTypeEd25519(Keypair.random().rawPublicKey()),
+       ),
+-      nonce: new xdr.Int64(1),
++      nonce: 1n,
+       signatureExpirationLedger: 100,
+       signature: xdr.ScVal.scvVoid(),
+     });
+@@ -130,14 +135,14 @@ describe("Stellar Shared Utilities", () => {
+       expect(getAddressCredentials(credentials)).toBeUndefined();
+     });
+ 
+-    it("returns undefined for delegated credentials", () => {
++    it("returns the top-level credentials for CAP-71-01 delegated credentials", () => {
+       const credentials = xdr.SorobanCredentials.sorobanCredentialsAddressWithDelegates(
+         new xdr.SorobanAddressCredentialsWithDelegates({
+           addressCredentials,
+           delegates: [],
+         }),
+       );
+-      expect(getAddressCredentials(credentials)).toBeUndefined();
++      expect(getAddressCredentials(credentials)).toBe(addressCredentials);
+     });
+   });
+ 
+@@ -184,7 +189,7 @@ describe("Stellar Shared Utilities", () => {
+         }),
+         signAuthEntries: vi.fn().mockResolvedValue(undefined),
+         simulate: vi.fn().mockResolvedValue(undefined),
+-        built: { toXDR: () => transactionXDR },
++        built: { toXdr: () => transactionXDR },
+       } as unknown as AssembledTransaction<any>);
+ 
+       const scheme = new ExactStellarScheme(signer);
+@@ -237,7 +242,7 @@ describe("Stellar Shared Utilities", () => {
+       ): xdr.SorobanAuthorizationEntry {
+         const addressCredentials = new xdr.SorobanAddressCredentials({
+           address: new Address(signerAddress).toScAddress(),
+-          nonce: new xdr.Int64(nonce),
++          nonce: BigInt(nonce),
+           signatureExpirationLedger: 0,
+           signature: xdr.ScVal.scvVoid(),
+         });
+@@ -280,16 +285,22 @@ describe("Stellar Shared Utilities", () => {
+        * @param signature - The signature ScVal from address credentials
+        * @returns The raw signature bytes
+        */
+-      function extractSignatureBytes(signature: xdr.ScVal): Buffer {
+-        const signatureEntry = signature
+-          .vec()![0]
+-          .map()!
+-          .find(entry => entry.key().sym().toString() === "signature");
++      function extractSignatureBytes(signature: xdr.ScVal): Uint8Array {
++        if (signature.type !== "scvVec" || !signature.vec) {
++          throw new Error("Signature ScVal is not a vec");
++        }
++        const first = signature.vec[0];
++        if (first.type !== "scvMap" || !first.map) {
++          throw new Error("Signature ScVal entry is not a map");
++        }
++        const signatureEntry = first.map.find(
++          entry => entry.key.type === "scvSymbol" && entry.key.sym.toString() === "signature",
++        );
+ 
+-        if (!signatureEntry) {
++        if (!signatureEntry || signatureEntry.val.type !== "scvBytes") {
+           throw new Error("Signature ScVal has no `signature` member");
+         }
+-        return signatureEntry.val().bytes();
++        return signatureEntry.val.bytes.value;
+       }
+ 
+       it("should count a genuinely signed V2 entry as signed", async () => {
+@@ -301,9 +312,7 @@ describe("Stellar Shared Utilities", () => {
+         );
+ 
+         // Guards against a relabelled V1 fixture silently passing as V2
+-        expect(signedEntry.credentials().switch()).toBe(
+-          xdr.SorobanCredentialsType.sorobanCredentialsAddressV2(),
+-        );
++        expect(signedEntry.credentials.type).toBe("sorobanCredentialsAddressV2");
+ 
+         const status = gatherAuthEntrySignatureStatus({
+           transaction: wrapInTransaction([signedEntry]),
+@@ -330,13 +339,13 @@ describe("Stellar Shared Utilities", () => {
+           StellarNetworks.TESTNET,
+         );
+ 
+-        const credentials = getAddressCredentials(signedEntry.credentials());
++        const credentials = getAddressCredentials(signedEntry.credentials);
+         if (!credentials) {
+           throw new Error("Expected address credentials on the signed V2 entry");
+         }
+-        expect(credentials.signatureExpirationLedger()).toBe(EXPIRATION_LEDGER);
++        expect(credentials.signatureExpirationLedger).toBe(EXPIRATION_LEDGER);
+ 
+-        const signatureBytes = extractSignatureBytes(credentials.signature());
++        const signatureBytes = extractSignatureBytes(credentials.signature);
+         const clientKey = Keypair.fromPublicKey(CLIENT_PUBLIC);
+ 
+         // V2 commits to ENVELOPE_TYPE_SOROBAN_AUTHORIZATION_WITH_ADDRESS (CAP-71)
+@@ -345,8 +354,8 @@ describe("Stellar Shared Utilities", () => {
+           EXPIRATION_LEDGER,
+           StellarNetworks.TESTNET,
+         );
+-        expect(v2Preimage.switch().name).toBe("envelopeTypeSorobanAuthorizationWithAddress");
+-        expect(clientKey.verify(hash(v2Preimage.toXDR()), signatureBytes)).toBe(true);
++        expect(v2Preimage.type).toBe("envelopeTypeSorobanAuthorizationWithAddress");
++        expect(clientKey.verify(hash(v2Preimage.toXdr()), signatureBytes)).toBe(true);
+ 
+         // The same signature must NOT satisfy the legacy, non-address-bound
+         // preimage over an otherwise identical invocation and nonce - the two
+@@ -356,8 +365,8 @@ describe("Stellar Shared Utilities", () => {
+           EXPIRATION_LEDGER,
+           StellarNetworks.TESTNET,
+         );
+-        expect(v1Preimage.switch().name).toBe("envelopeTypeSorobanAuthorization");
+-        expect(clientKey.verify(hash(v1Preimage.toXDR()), signatureBytes)).toBe(false);
++        expect(v1Preimage.type).toBe("envelopeTypeSorobanAuthorization");
++        expect(clientKey.verify(hash(v1Preimage.toXdr()), signatureBytes)).toBe(false);
+       });
+ 
+       it("should count signed V1 and V2 entries in the same transaction", async () => {
+@@ -406,5 +415,160 @@ describe("Stellar Shared Utilities", () => {
+         expect(status.pendingSignature).toHaveLength(0);
+       });
+     });
++
++    describe("CAP-71-01 address-with-delegates credentials", () => {
++      const EXPIRATION_LEDGER = 100_500;
++      const delegateA = Keypair.random();
++      const delegateB = Keypair.random();
++      const nestedDelegate = Keypair.random();
++
++      /**
++       * Wraps authorization entries in a single-operation transaction.
++       *
++       * @param auth - The authorization entries to attach to the operation
++       * @returns A built transaction carrying the entries
++       */
++      function wrapInTransaction(auth: xdr.SorobanAuthorizationEntry[]): Transaction {
++        const operation = Operation.invokeHostFunction({
++          func: xdr.HostFunction.hostFunctionTypeInvokeContract(
++            auth[0].rootInvocation.function.type === "sorobanAuthorizedFunctionTypeContractFn"
++              ? auth[0].rootInvocation.function.contractFn
++              : (() => {
++                  throw new Error("expected a contract fn invocation");
++                })(),
++          ),
++          auth,
++        });
++        return new TransactionBuilder(new Account(CLIENT_PUBLIC, "100"), {
++          fee: "100",
++          networkPassphrase: StellarNetworks.TESTNET,
++        })
++          .addOperation(operation)
++          .setTimeout(60)
++          .build();
++      }
++
++      /**
++       * Builds an unsigned V2 entry for the client account, then wraps it in the
++       * CAP-71-01 delegates arm with the given delegate tree (all signatures void).
++       *
++       * @param delegates - The delegate tree to attach (addresses only)
++       * @returns An unsigned address-with-delegates entry
++       */
++      function buildUnsignedDelegatesEntry(
++        delegates: { address: string; nestedDelegates?: { address: string }[] }[],
++      ): xdr.SorobanAuthorizationEntry {
++        const v2Entry = new xdr.SorobanAuthorizationEntry({
++          credentials: xdr.SorobanCredentials.sorobanCredentialsAddressV2(
++            new xdr.SorobanAddressCredentials({
++              address: new Address(CLIENT_PUBLIC).toScAddress(),
++              nonce: 7n,
++              signatureExpirationLedger: 0,
++              signature: xdr.ScVal.scvVoid(),
++            }),
++          ),
++          rootInvocation: new xdr.SorobanAuthorizedInvocation({
++            function: xdr.SorobanAuthorizedFunction.sorobanAuthorizedFunctionTypeContractFn(
++              new xdr.InvokeContractArgs({
++                contractAddress: new Address(
++                  "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
++                ).toScAddress(),
++                functionName: "transfer",
++                args: [
++                  nativeToScVal(CLIENT_PUBLIC, { type: "address" }),
++                  nativeToScVal("GCHEI4PQEFJOA27MNZRPQNLGURS6KASW76X5UZCUZIXCOJLKXYCXOR2W", {
++                    type: "address",
++                  }),
++                  nativeToScVal("10000", { type: "i128" }),
++                ],
++              }),
++            ),
++            subInvocations: [],
++          }),
++        });
++        return buildWithDelegatesEntry({
++          entry: v2Entry,
++          validUntilLedgerSeq: EXPIRATION_LEDGER,
++          delegates,
++        });
++      }
++
++      it("exposes delegates and reports an entry unsigned until every delegate signs", async () => {
++        const unsigned = buildUnsignedDelegatesEntry([
++          { address: delegateA.publicKey() },
++          {
++            address: delegateB.publicKey(),
++            nestedDelegates: [{ address: nestedDelegate.publicKey() }],
++          },
++        ]);
++        expect(unsigned.credentials.type).toBe("sorobanCredentialsAddressWithDelegates");
++        expect(getAddressCredentials(unsigned.credentials)?.signatureExpirationLedger).toBe(
++          EXPIRATION_LEDGER,
++        );
++        expect(
++          collectDelegateAddresses(getDelegateSignatures(unsigned.credentials)).sort(),
++        ).toEqual(
++          [delegateA.publicKey(), delegateB.publicKey(), nestedDelegate.publicKey()].sort(),
++        );
++        expect(areAllDelegatesSigned(getDelegateSignatures(unsigned.credentials))).toBe(false);
++        expect(isAuthEntrySigned(unsigned.credentials)).toBe(false);
++
++        // Sign delegate A and B but leave the nested delegate unsigned: still pending.
++        let partial = await authorizeEntry(
++          unsigned,
++          delegateA,
++          EXPIRATION_LEDGER,
++          StellarNetworks.TESTNET,
++          delegateA.publicKey(),
++        );
++        partial = await authorizeEntry(
++          partial,
++          delegateB,
++          EXPIRATION_LEDGER,
++          StellarNetworks.TESTNET,
++          delegateB.publicKey(),
++        );
++        expect(isAuthEntrySigned(partial.credentials)).toBe(false);
++        let status = gatherAuthEntrySignatureStatus({ transaction: wrapInTransaction([partial]) });
++        expect(status.alreadySigned).toHaveLength(0);
++        expect(status.pendingSignature).toEqual([CLIENT_PUBLIC]);
++
++        // Sign the nested delegate too: the top-level signature stays void, but
++        // the entry now counts as signed by the top-level (payer) address.
++        const full = await authorizeEntry(
++          partial,
++          nestedDelegate,
++          EXPIRATION_LEDGER,
++          StellarNetworks.TESTNET,
++          nestedDelegate.publicKey(),
++        );
++        const topLevel = getAddressCredentials(full.credentials);
++        expect(topLevel?.signature.type).toBe("scvVoid");
++        expect(isAuthEntrySigned(full.credentials)).toBe(true);
++        status = gatherAuthEntrySignatureStatus({ transaction: wrapInTransaction([full]) });
++        expect(status.alreadySigned).toEqual([CLIENT_PUBLIC]);
++        expect(status.pendingSignature).toHaveLength(0);
++      });
++
++      it("reports a delegates entry with no delegates and a void top-level signature as pending", () => {
++        const entry = buildUnsignedDelegatesEntry([]);
++        expect(isAuthEntrySigned(entry.credentials)).toBe(false);
++        const status = gatherAuthEntrySignatureStatus({ transaction: wrapInTransaction([entry]) });
++        expect(status.pendingSignature).toEqual([CLIENT_PUBLIC]);
++      });
++
++      it("counts a delegates entry as signed when the top-level account signed itself", async () => {
++        const signed = await authorizeEntry(
++          buildUnsignedDelegatesEntry([{ address: delegateA.publicKey() }]),
++          Keypair.fromSecret(CLIENT_SECRET),
++          EXPIRATION_LEDGER,
++          StellarNetworks.TESTNET,
++        );
++        expect(signed.credentials.type).toBe("sorobanCredentialsAddressWithDelegates");
++        expect(isAuthEntrySigned(signed.credentials)).toBe(true);
++        const status = gatherAuthEntrySignatureStatus({ transaction: wrapInTransaction([signed]) });
++        expect(status.alreadySigned).toEqual([CLIENT_PUBLIC]);
++      });
++    });
+   });
+ });
+diff --git a/typescript/packages/mechanisms/stellar/test/unit/signer.test.ts b/typescript/packages/mechanisms/stellar/test/unit/signer.test.ts
+index 3ebe6d6..2bdccbd 100644
+--- a/typescript/packages/mechanisms/stellar/test/unit/signer.test.ts
++++ b/typescript/packages/mechanisms/stellar/test/unit/signer.test.ts
+@@ -112,6 +112,16 @@ describe("Stellar Ed25519 Signer", () => {
+       expect(isClientStellarSigner(mockSigner)).toBe(true);
+     });
+ 
++    it("should accept an optional authorizeEntry on client signers only when it is a function", () => {
++      const withAuthorize = {
++        address: validPublicKey,
++        signAuthEntry: async () => ({ signedAuthEntry: "" }),
++        authorizeEntry: async (entry: unknown) => entry,
++      };
++      expect(isClientStellarSigner(withAuthorize)).toBe(true);
++      expect(isClientStellarSigner({ ...withAuthorize, authorizeEntry: "nope" })).toBe(false);
++    });
++
+     it("should return false for invalid types", () => {
+       // false for null
+       expect(isFacilitatorStellarSigner(null)).toBe(false);

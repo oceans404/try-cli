@@ -66,13 +66,10 @@ else
 fi
 
 step "Writing .env (git-ignored)"
-# Node can't use the cloud proxy unless NODE_USE_ENV_PROXY=1, so in a cloud
-# session the scripts talk to RPC through the same localhost relay as the CLI.
-if [ -n "${HTTPS_PROXY:-}" ] && curl -s -m 3 -o /dev/null http://127.0.0.1:8001/; then
-  RPC_URL=http://127.0.0.1:8001
-else
-  RPC_URL=https://soroban-testnet.stellar.org
-fi
+# Node scripts use the real RPC over HTTPS. In a cloud session the npm scripts
+# set NODE_USE_ENV_PROXY=1 so Node goes through the proxy (only the CLI needs
+# the localhost relay).
+RPC_URL=https://soroban-testnet.stellar.org
 umask 077
 cat > .env <<EOF
 # Written by setup-b.sh. Holds testnet secrets: never commit.

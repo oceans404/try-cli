@@ -20,13 +20,15 @@ import { PASSPHRASE, server, policyError } from "./config.mjs";
 const NULL_ACCOUNT = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
 
 function transferTx(source, asset, from, to, amount, auth) {
+  // Each build bumps the account's sequence number, so build from a fresh copy.
+  source = new Account(source.accountId(), source.sequenceNumber());
   const call = new Contract(asset).call(
     "transfer",
     nativeToScVal(from, { type: "address" }),
     nativeToScVal(to, { type: "address" }),
     nativeToScVal(BigInt(amount), { type: "i128" }),
   );
-  const op = auth ? Operation.invokeHostFunction({ func: call.body().invokeHostFunctionOp().hostFunction(), auth }) : call;
+  const op = auth ? Operation.invokeHostFunction({ func: call.body.invokeHostFunctionOp.hostFunction, auth }) : call;
   return new TransactionBuilder(source, { fee: BASE_FEE, networkPassphrase: PASSPHRASE })
     .addOperation(op)
     .setTimeout(300)
@@ -55,7 +57,7 @@ export async function buildPayment({ signer, asset, payTo, amount, validUntilLed
     throw new Error(`can't build the payment: ${why}`);
   }
   const auth = await Promise.all(
-    recording.result.auth.map((e) => (signer.owns(e) ? signer.authorize(e, validUntilLedger) : e)),
+    recording.result.auth.map((e) => (signer.owns(e) ? signer.authorizeEntry(e, validUntilLedger) : e)),
   );
 
   const signed = transferTx(src, asset, signer.address, payTo, amount, auth);
@@ -105,6 +107,6 @@ export class PolicyExactScheme {
     const payment = await buildPayment({ signer: this.signer, asset, payTo, amount, validUntilLedger });
     this.last = { requirements, payment };
     if (!payment.ok && this.localCheck) throw new PolicyRefused(payment);
-    return { x402Version, payload: { transaction: payment.transaction.toXDR() } };
+    return { x402Version, payload: { transaction: payment.transaction.toXdr() } };
   }
 }

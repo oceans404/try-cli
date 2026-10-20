@@ -25,9 +25,10 @@ rules guard a normal account.
 | Policy contract | `contracts/agent_policy/src/lib.rs` | Soroban custom account. Holds the rules, checks the agent's signature, checks every payment, tracks the day's spending. Owner-only `update_rules` and `withdraw` |
 | Seller (x3) | `../server.js` | True Prices, an x402 API: `GET /price-check?item=…` for $1. The demo runs it three times (below) |
 | Facilitator | `facilitator.mjs` | Verifies and settles x402 payments. Stock `ExactStellarScheme` from `@x402/stellar` with stock settings, plus a `GET /log` of verify results |
-| Agent signer | `signer.mjs` | Signs Soroban auth entries for `agent_policy` with the agent's ed25519 key, as an `AgentSignature { public_key, signature }` |
-| Payment builder | `payment.mjs` | Builds the x402 payment: the USDC `transfer` from the wallet, simulated twice (see below). Also the x402 client scheme `PolicyExactScheme` |
-| Agent (buyer) | `buy-agent.mjs` | Makes one purchase: request, get 402, build and sign the payment, retry with it |
+| Agent signer | `signer.mjs` | Signs Soroban auth entries for `agent_policy` with the agent's ed25519 key, as an `AgentSignature { public_key, signature }`. Exposes `authorizeEntry`, so the stock x402 client can use it |
+| x402 for SDK 17 | `../vendor/x402-stellar` | Our port of `@x402/stellar` 2.28 to `@stellar/stellar-sdk` 17, plus delegated credentials and custom-account signers ([PORT.md](../vendor/x402-stellar/PORT.md)) |
+| Payment builder | `payment.mjs` | Builds the payment by hand, simulated twice (see below). Its `PolicyExactScheme` is the misbehaving agent's x402 scheme: it sends the payment even when the policy refuses it |
+| Agent (buyer) | `buy-agent.mjs` | Makes one purchase: request, get 402, build and sign the payment, retry with it. Stock x402 client when well-behaved, `PolicyExactScheme` when not |
 | Direct submit | `direct-submit.mjs` | Sends a policy-breaking payment straight to RPC, around the facilitator, so there's a failed transaction onchain |
 | Read helpers | `chain.mjs` | Simulated reads: balances, rules, today's spending |
 | Runner | `demo.mjs` | Starts the facilitator and sellers, runs the four steps, handles the live edits |
@@ -104,10 +105,24 @@ whether the policy will accept the payment.
 A normal account signature is a vector of `{public_key, signature}` maps, and
 the SDK builds it for you. A custom account decides its own signature type.
 `agent_policy` takes one `AgentSignature { public_key, signature }`, so the
-signer passes a ready-made `signatureScVal` to `authorizeEntry`. The stock
-`@x402/stellar` client can't do this, because `signAuthEntries`' callback only
-returns raw signature bytes, so `payment.mjs` replaces the client's
-`createPaymentPayload`.
+signer passes a ready-made `signatureScVal` to the SDK's `authorizeEntry`.
+Upstream `@x402/stellar` can't do this, because `signAuthEntries`' callback only
+returns raw signature bytes. Our port adds an optional `authorizeEntry` to the
+client signer; `signer.mjs` provides one, and the stock client then pays from
+the smart account with no other changes.
+
+### Why there's a port of @x402/stellar
+
+The demo uses `@stellar/stellar-sdk` 17, the current major. SDK 17 rebuilt the
+XDR layer (immutable classes, properties instead of methods, string `type`
+discriminants), and upstream `@x402/stellar` (still on 16.3) breaks against it.
+Two copies of the SDK in one app also break `instanceof` checks. So
+`../vendor/x402-stellar` is upstream 2.28 ported to SDK 17, with the same API and
+refusal reasons, plus two additions this demo needs: custom-account signers
+(above), and CAP-71-01 delegated credentials (`SorobanCredentialsAddressWithDelegates`),
+which are what version A's G-account payments carry. Its unit tests (192) and
+the live testnet integration suite pass. Details and the full diff are in
+[PORT.md](../vendor/x402-stellar/PORT.md).
 
 ### Why the demo runs its own facilitator
 
@@ -117,7 +132,7 @@ off a shared service's uptime and latency (the spec measured 5.7 to 20.5
 seconds per paid request on the public testnet facilitator) and gives the
 runner a log of exact refusal reasons. Version A needs a local one anyway: it
 uses a credential type (`SorobanCredentialsAddressWithDelegates`) the public
-facilitators don't accept yet.
+facilitators don't accept yet. Our port accepts it.
 
 Two facilitator checks shaped the contract. The stock facilitator rejects any
 contract event other than the token's `transfer`, so `agent_policy` emits no
@@ -186,7 +201,7 @@ for the next one. With temporary storage the first payment costs 26,328.
 | Attaching the policy (step 2) | Deploying it is attaching it | `SetOptionsOp` adds `agent_policy` as a signer (weight 1, master weight 2, thresholds 1/1/2) |
 | Auth entry credentials | `SorobanCredentialsAddress` for the C-address, `AgentSignature` as the signature | `SorobanCredentialsAddressWithDelegates` for the G-address: void top-level signature, one delegate `{ agent_policy, AgentSignature }` |
 | Who runs `__check_auth` | The host, because the C-address is a custom account | The host, through CAP-71-01's delegation, after checking `agent_policy` is a delegated signer on the account |
-| Facilitator | Stock scheme, stock settings | Also accepts the delegated credential type |
+| Facilitator | Ported scheme, stock settings | Same; the port already accepts the delegated credential type |
 | Network | Testnet through RPC | A `stellar/quickstart` image built from patched core, host and RPC |
 | Explorer links | stellar.expert | None. The runner prints results from RPC `getTransaction` |
 
@@ -245,10 +260,12 @@ What each layer needs:
    `SetOptionsOp` and prints the account's signers itself with the patched JS
    SDK. Step 1's classic payment still works with the stock CLI, because nothing
    CAP-72-specific is on the account yet.
-7. **Facilitator.** `@x402/stellar`'s `getAddressCredentials` returns nothing for
-   the delegated credential type, so version A's facilitator subclasses the
-   scheme to accept it. `@x402/stellar` also only knows `stellar:testnet` and
-   `stellar:pubnet`, so it needs an entry for the local network.
+7. **Facilitator.** Upstream `@x402/stellar` rejects the delegated credential
+   type, but our port (`../vendor/x402-stellar`) accepts it, so the
+   facilitator needs no change for that. `@x402/stellar` only knows
+   `stellar:testnet` and `stellar:pubnet`, so it still needs an entry for the
+   local network. The JS SDK in version A is SDK 17 with the new signer arm
+   added to its XDR.
 
 Once the image exists, version A's run looks like the spec's demo experience
 section: classic payment in, `SetOptionsOp` to attach the policy, the same

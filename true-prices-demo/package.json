@@ -3,15 +3,15 @@
   "version": "1.0.0",
   "description": "A tiny x402 price-check API on Stellar, the seller in the CAP-72 agent wallet demo",
   "scripts": {
-    "start": "node server.js"
+    "start": "NODE_USE_ENV_PROXY=1 node --disable-warning=UNDICI-EHPA server.js"
   },
   "type": "module",
   "private": true,
   "dependencies": {
-    "@stellar/stellar-sdk": "16.3.0",
-    "@x402/core": "2.27.0",
-    "@x402/express": "2.27.0",
-    "@x402/stellar": "2.27.0",
+    "@stellar/stellar-sdk": "17.2.1",
+    "@x402/core": "2.28.0",
+    "@x402/express": "2.28.0",
+    "@x402/stellar": "file:./vendor/x402-stellar",
     "dotenv": "^18.0.3",
     "express": "^5.2.1"
   },

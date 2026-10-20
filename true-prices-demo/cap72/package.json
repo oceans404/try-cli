@@ -3,18 +3,18 @@
   "version": "1.0.0",
   "description": "CAP-72 agent wallet demo: an agent pays an x402 seller through an onchain spending policy",
   "scripts": {
-    "demo": "node demo.mjs",
-    "facilitator": "node facilitator.mjs",
-    "buy:agent": "node buy-agent.mjs",
-    "direct-submit": "node direct-submit.mjs",
+    "demo": "NODE_USE_ENV_PROXY=1 node --disable-warning=UNDICI-EHPA demo.mjs",
+    "facilitator": "NODE_USE_ENV_PROXY=1 node --disable-warning=UNDICI-EHPA facilitator.mjs",
+    "buy:agent": "NODE_USE_ENV_PROXY=1 node --disable-warning=UNDICI-EHPA buy-agent.mjs",
+    "direct-submit": "NODE_USE_ENV_PROXY=1 node --disable-warning=UNDICI-EHPA direct-submit.mjs",
     "test:contract": "cd contracts/agent_policy && cargo test"
   },
   "type": "module",
   "private": true,
   "dependencies": {
-    "@stellar/stellar-sdk": "16.3.0",
-    "@x402/core": "2.27.0",
-    "@x402/stellar": "2.27.0",
+    "@stellar/stellar-sdk": "17.2.1",
+    "@x402/core": "2.28.0",
+    "@x402/stellar": "file:../vendor/x402-stellar",
     "dotenv": "^18.0.3",
     "express": "^5.2.1"
   },

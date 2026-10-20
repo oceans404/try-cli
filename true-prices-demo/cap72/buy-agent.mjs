@@ -4,7 +4,8 @@
 //                     the policy refuses it (what a misbehaving agent would do)
 import { x402Client } from "@x402/core/client";
 import { x402HTTPClient } from "@x402/core/http";
-import { PASSPHRASE, SELLERS, env, usdc, short, txLink } from "./config.mjs";
+import { ExactStellarScheme } from "@x402/stellar/exact/client";
+import { PASSPHRASE, RPC_URL, SELLERS, env, usdc, short, txLink, policyError } from "./config.mjs";
 import { createPolicySigner } from "./signer.mjs";
 import { PolicyExactScheme } from "./payment.mjs";
 
@@ -25,7 +26,12 @@ async function get(url, init) {
  */
 export async function buy(url, { localCheck = true, agent = env.agent } = {}) {
   const signer = createPolicySigner(agent, env.policy, PASSPHRASE);
-  const scheme = new PolicyExactScheme(signer, { localCheck });
+  // A well-behaved agent uses the stock x402 client: the signer's authorizeEntry
+  // lets it pay from the policy wallet. A misbehaving one uses PolicyExactScheme,
+  // which sends the payment even when its own simulation says the policy refuses.
+  const scheme = localCheck
+    ? new ExactStellarScheme(signer, { url: RPC_URL })
+    : new PolicyExactScheme(signer, { localCheck: false });
   const client = new x402Client().register("stellar:*", scheme);
   // x402's client has its own spend controls (by default, at most $1 per payment).
   // They live in the agent's software, so a misbehaving agent can turn them off.
@@ -43,6 +49,8 @@ export async function buy(url, { localCheck = true, agent = env.agent } = {}) {
   } catch (e) {
     if (scheme.last && !scheme.last.payment.ok) return { stage: "agent", status: 402, terms, payment: scheme.last.payment };
     if (/spendControls/.test(e.message)) return { stage: "agent", status: 402, terms, reason: e.message.split(". ")[0] };
+    const refused = policyError(e.message);
+    if (refused) return { stage: "agent", status: 402, terms, payment: { ok: false, policyError: refused, error: e.message } };
     throw e;
   }
 

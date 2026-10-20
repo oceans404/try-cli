@@ -54,7 +54,7 @@ async function waitFor(url) {
 function start(name, script, cwd, extraEnv) {
   mkdirSync(join(HERE, "logs"), { recursive: true });
   const out = openSync(join(HERE, "logs", `${name}.log`), "w");
-  const child = spawn(process.execPath, [script], { cwd, env: { ...process.env, ...extraEnv }, stdio: ["ignore", out, out] });
+  const child = spawn(process.execPath, [...process.execArgv, script], { cwd, env: { ...process.env, ...extraEnv }, stdio: ["ignore", out, out] });
   children.push(child);
 }
 
