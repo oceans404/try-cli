@@ -1,20 +1,41 @@
 // Seller dashboard: sketches sold and revenue, refreshed every few seconds.
-// Data comes from the Rail402 explorer's public API, which indexes settled
-// payments per payTo. It labels payments by recipient, not by route, so sales
-// are the payments to STELLAR_RECIPIENT of exactly the sketch price in USDC.
-const EXPLORER = process.env.EXPLORER_API || "https://explorer-explorer.up.railway.app";
+// Data comes from the Rail402 explorer's public read API
+// (https://explorer.rail402.dev/api/v1/openapi.json), which indexes settled
+// x402 payments per account. It labels payments by recipient, not by route, so
+// sales are the payments to STELLAR_RECIPIENT of exactly the sketch price in
+// USDC. It only counts facilitators in its registry (Rail402 and x402.org), so
+// sales settled through OZ Channels don't show up here.
+const EXPLORER = process.env.EXPLORER_API || "https://explorer.rail402.dev";
+const MAX_PAGES = 20; // 100 settlements per page
+
+async function settlementsTo(payTo, network) {
+  const net = network === "stellar:pubnet" ? "pubnet" : "testnet";
+  const items = [];
+  let cursor;
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const url = new URL(`${EXPLORER}/api/v1/${net}/accounts/${payTo}/settlements`);
+    url.searchParams.set("role", "payTo");
+    url.searchParams.set("limit", "100");
+    if (cursor) url.searchParams.set("cursor", cursor);
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`explorer ${r.status}`);
+    const d = await r.json();
+    items.push(...d.items);
+    cursor = d.nextCursor;
+    if (!cursor || d.items.length === 0) break;
+  }
+  return items;
+}
 
 export function mountDashboard(app, { payTo, priceUnits, asset, network }) {
   const expert = `https://stellar.expert/explorer/${network === "stellar:pubnet" ? "public" : "testnet"}`;
 
   app.get("/dashboard/data", async (_req, res) => {
     try {
-      const r = await fetch(`${EXPLORER}/seller/${payTo}`);
-      if (!r.ok) throw new Error(`explorer ${r.status}`);
-      const { payments = [] } = await r.json();
+      const payments = await settlementsTo(payTo, network);
       const sales = payments
-        .filter((p) => p.amount === priceUnits && p.assetContract === asset)
-        .map((p) => ({ tx: p.txHash, buyer: p.buyer, usdc: p.amountDecimal, at: p.closedAt, link: `${expert}/tx/${p.txHash}` }));
+        .filter((p) => p.payTo === payTo && p.amount === priceUnits && p.asset?.contract === asset)
+        .map((p) => ({ tx: p.txHash, buyer: p.payer, usdc: (Number(p.amount) / 1e7).toFixed(2), at: p.closedAt, link: `${expert}/tx/${p.txHash}` }));
       const revenue = sales.reduce((sum, s) => sum + BigInt(priceUnits), 0n);
       res.json({
         payTo,

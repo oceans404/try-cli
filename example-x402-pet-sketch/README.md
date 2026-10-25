@@ -73,7 +73,7 @@ Deploy and list it exactly like [example-x402-seller](../example-x402-seller/REA
 
 - Root Directory `example-x402-pet-sketch`
 - `OPENAI_API_KEY` in the host's environment variables, never in the repo
-- `FACILITATOR_URL=https://facilitator.rail402.dev` and your `STELLAR_RECIPIENT`
+- `FACILITATOR_URL=https://testnet.rail402.dev` (the default) and your `STELLAR_RECIPIENT`
 - the first paid call made against the public `https://` URL
 
 ## Sales dashboard
@@ -81,7 +81,9 @@ Deploy and list it exactly like [example-x402-seller](../example-x402-seller/REA
 `/dashboard` shows sketches sold, total revenue, unique buyers, and each sale
 with its stellar.expert link, refreshing every 5 seconds. It reads settled
 payments to `STELLAR_RECIPIENT` from the Rail402 explorer's public API and
-counts those of exactly $0.25 in USDC. The explorer groups payments by
+counts those of exactly $0.25 in USDC. The explorer only counts facilitators
+in its registry (Rail402 and x402.org), so sales settled through OZ Channels
+don't appear. It groups payments by
 recipient, not by route, so give this service its own `STELLAR_RECIPIENT` if
 the same address is paid for other things at the same price. The data is
 public onchain, so the page needs no login.

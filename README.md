@@ -15,7 +15,7 @@ and only with a person's OK.
 
 | Path | What you'll find |
 | --- | --- |
-| [`example-x402-seller/`](example-x402-seller) | A paid x402 API ([live on testnet](https://try-cli-jukj.onrender.com/fortune), 0.01 USDC per fortune, listed on Rail402), how to run and host your own, and `buy.mjs`, a buyer for any Stellar x402 URL |
+| [`example-x402-seller/`](example-x402-seller) | A paid x402 API ([live on testnet](https://try-cli-jukj.onrender.com/fortune), 0.01 USDC per fortune), how to run and host your own, and `buy.mjs`, a buyer for any Stellar x402 URL |
 | [`privy-wallet/`](privy-wallet) | A Stellar wallet whose key is held by [Privy](https://privy.io), not by the agent. The CLI builds transactions and `privy.mjs` shows and signs them; a USDC allowance caps spending. [`LOG.md`](privy-wallet/LOG.md) records every transaction it has made |
 | [`docs/`](docs) | A directory of 10 Stellar DeFi services and how to check them yourself, and CLI recipes tested on testnet (Soroswap, Blend, DeFindex, classic DEX/AMM, CETES). Also an experimental record of one hour of mainnet DeFi by Claude, kept to show how it went, not as a guide |
 | [`scripts/`](scripts) | `session-start.sh` readies a session, `setup.sh` builds the CLI, `rpc-relay.py` lets the CLI reach Stellar through the cloud proxy |

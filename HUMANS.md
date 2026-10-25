@@ -56,8 +56,8 @@ builds it in the background instead.
 | `developers.stellar.org`, `developers-pr-2869.previews.kube001.services.stellar-ops.com` | Stellar docs, and the agent CLI docs preview |
 | `skills.stellar.org`, `raven.stellar.org` | Stellar Skills, Raven docs |
 | `stellar.rgstry.xyz`, `testnet.rgstry.xyz` | Contract registry (DeFi contract IDs) |
-| `explorer-explorer.up.railway.app`, `demo-seller-testnet.up.railway.app`, `playground-api-production-5062.up.railway.app`, `try-cli-jukj.onrender.com` | x402 marketplace (Rail402) and sellers |
-| `channels.openzeppelin.com`, `facilitator.rail402.dev` | x402 facilitators |
+| `testnet.rail402.dev`, `explorer.rail402.dev`, `playground.rail402.dev`, `docs.rail402.dev`, `demo.rail402.dev`, `try-cli-jukj.onrender.com`, `try-cli-1.onrender.com` | x402 marketplace (Rail402) and sellers |
+| `channels.openzeppelin.com`, `testnet.rail402.dev` | x402 facilitators |
 | `github.com`, `raw.githubusercontent.com`, `crates.io`, `index.crates.io`, `static.crates.io`, `registry.npmjs.org` | Building the CLI, npm packages, reading contract source |
 
 All of these were reachable from the original environment on 2026-09-24. If a

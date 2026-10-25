@@ -1,7 +1,7 @@
 # example-x402-seller
 
 **Live on testnet:** https://try-cli-jukj.onrender.com/fortune
-(listed on Rail402 as ["Stellar Fortunes"](https://explorer.rail402.dev/testnet/address/GBCKZHYGFWRS77UVZCOGTST55OL3HHXDSAYZRKPNBQGO5DXHSCBGRL7B))
+(sales: [Rail402 explorer](https://explorer.rail402.dev/testnet/account/GBCKZHYGFWRS77UVZCOGTST55OL3HHXDSAYZRKPNBQGO5DXHSCBGRL7B))
 
 A minimal paid API on Stellar using [x402](https://www.x402.org/).
 `GET /fortune` returns a fortune-cookie fortune with six lucky numbers for
@@ -14,11 +14,11 @@ Pick the facilitator in `.env`:
 | Facilitator | Networks | API key | Listed in a marketplace |
 | --- | --- | --- | --- |
 | [OZ Channels](https://channels.openzeppelin.com) (default) | testnet, mainnet | required | no |
-| [Rail402](https://docs.rail402.dev) | testnet | none | yes, the [Rail402 Bazaar](https://explorer.rail402.dev/testnet/sellers?registered=true) |
+| [Rail402](https://docs.rail402.dev) | testnet | none | yes, the [Rail402 Bazaar](https://playground.rail402.dev/bazaar) |
 
 Based on the Agentic Payments skill's
 [x402 guide](https://skills.stellar.org/skills/agentic-payments/x402.md) and
-Rail402's [seller quickstart](https://docs.rail402.dev/sellers/quickstart).
+Rail402's [seller quickstart](https://docs.rail402.dev/quickstart/sellers).
 
 ## Files
 
@@ -66,7 +66,7 @@ and the environment sets `NODE_USE_ENV_PROXY=1`. On your own machine, use
    - **OZ Channels:** keep the default `FACILITATOR_URL` and set `OZ_API_KEY`.
      Get a free testnet key with `curl -s https://channels.openzeppelin.com/testnet/gen`
      (each request creates a new key).
-   - **Rail402:** set `FACILITATOR_URL=https://facilitator.rail402.dev` and
+   - **Rail402:** set `FACILITATOR_URL=https://testnet.rail402.dev` and
      leave `OZ_API_KEY` empty. See [Listing on Rail402](#listing-on-rail402)
      before the first payment.
 
@@ -138,7 +138,7 @@ Environment variables:
 | Key | Value |
 | --- | --- |
 | `STELLAR_NETWORK` | `stellar:testnet` |
-| `FACILITATOR_URL` | `https://facilitator.rail402.dev` (or the OZ Channels URL) |
+| `FACILITATOR_URL` | `https://testnet.rail402.dev` (or the OZ Channels URL) |
 | `STELLAR_RECIPIENT` | your `payTo` address (see below) |
 | `OZ_API_KEY` | only for OZ Channels |
 
@@ -185,14 +185,14 @@ record.
 
 ## Listing on Rail402
 
-A route is listed in Rail402's [Bazaar](https://explorer.rail402.dev/testnet/sellers?registered=true)
+A route is listed in Rail402's [Bazaar](https://playground.rail402.dev/bazaar)
 automatically once a payment for it settles through Rail402's facilitator. No
 sign-up. The listing is owned by the `payTo` and only updates on a settled
 payment.
 
 The route needs:
 
-- `FACILITATOR_URL=https://facilitator.rail402.dev` on `stellar:testnet`
+- `FACILITATOR_URL=https://testnet.rail402.dev` on `stellar:testnet`
 - `registerExtension(bazaarResourceServerExtension)` on the resource server
 - `serviceName` (the explorer won't show the route without it), `tags`,
   `description`, `mimeType`, and `maxTimeoutSeconds`
@@ -207,10 +207,10 @@ Then:
 2. Pay the plain route URL (no query string) from an account other than
    `payTo`:
    `STELLAR_SECRET="$(stellar keys secret buyer)" npm run buy -- https://<your-host>/<route>`
-3. Confirm: `curl -s "https://facilitator.rail402.dev/discovery/resources?payTo=<G_ADDRESS>"`
+3. Confirm: `curl -s "https://testnet.rail402.dev/discovery/resources?payTo=<G_ADDRESS>"`
 
 After changing any metadata, redeploy and pay once more to update the listing.
-Details: Rail402's [Get discovered](https://docs.rail402.dev/sellers/get-discovered).
+Details: Rail402's [Cataloging](https://docs.rail402.dev/bazaar/cataloging).
 
 ## Going to mainnet
 

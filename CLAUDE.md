@@ -97,8 +97,12 @@ on the DEX with `tx new path-payment-strict-receive --send-asset native
   data, the first place to look up mainnet protocols and contracts. Only
   available if the user added it as a connector before the session started (it
   needs browser OAuth). Otherwise fall back to `curl` and the registry.
-- **Rail402 Explorer** (testnet x402 marketplace):
-  `curl -sS "https://explorer-explorer.up.railway.app/sellers?limit=50&registered=true"`.
+- **Rail402** (testnet x402 facilitator and marketplace, docs at
+  `https://docs.rail402.dev/llms.txt`): list what's for sale with
+  `curl -sS "https://testnet.rail402.dev/discovery/resources?network=stellar:testnet&limit=100"`,
+  or search in plain words with `/discovery/search?query=...`. People browse it
+  at `https://playground.rail402.dev/bazaar`. Settled payments per account are
+  at `https://explorer.rail402.dev` (read API: `/api/v1/openapi.json`).
   An unpaid `resource` returns 402, and its `payment-required` header is
   base64 JSON with the terms. Pay with an x402 client (`@x402/stellar` +
   `@x402/fetch`, as in `example-x402-seller/buy.mjs`). The CLI can't pay.

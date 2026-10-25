@@ -1,7 +1,7 @@
 // Minimal x402 seller on Stellar. Settles through OZ Channels by default, or
 // through Rail402's facilitator (which also lists the route in its Bazaar).
 // Based on the Agentic Payments skill (skills.stellar.org, x402.md) and the
-// Rail402 seller quickstart (docs.rail402.dev/sellers/quickstart).
+// Rail402 seller quickstart (docs.rail402.dev/quickstart/sellers).
 // Network and facilitator come from .env: stellar:testnet now, stellar:pubnet later.
 import "dotenv/config";
 import express from "express";
