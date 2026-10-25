@@ -12,7 +12,13 @@ import { photoToSvg } from "./sketch.js";
 import { mountDashboard } from "./dashboard.js";
 
 const NETWORK = process.env.STELLAR_NETWORK || "stellar:testnet";
-const FACILITATOR_URL = process.env.FACILITATOR_URL || "https://testnet.rail402.dev";
+// Rail402 retired facilitator.rail402.dev (it no longer resolves). Deploys
+// configured before the move still set it, so map it to the new host.
+const RETIRED_RAIL402 = /^https:\/\/facilitator\.rail402\.dev\/?$/;
+const FACILITATOR_URL = (process.env.FACILITATOR_URL || "https://testnet.rail402.dev").replace(RETIRED_RAIL402, () => {
+  console.warn("FACILITATOR_URL points at the retired facilitator.rail402.dev; using https://testnet.rail402.dev");
+  return "https://testnet.rail402.dev";
+});
 const PORT = Number(process.env.PORT || 3002);
 const PAYWALL = process.env.PAYWALL !== "off";
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;

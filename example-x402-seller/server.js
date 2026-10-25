@@ -13,7 +13,13 @@ import { describeEndpoint } from "@rail402.dev/sdk";
 import { FORTUNES, TOPICS, luckyNumbers } from "./fortunes.js";
 
 const NETWORK = process.env.STELLAR_NETWORK || "stellar:testnet";
-const FACILITATOR_URL = process.env.FACILITATOR_URL || "https://channels.openzeppelin.com/x402/testnet";
+// Rail402 retired facilitator.rail402.dev (it no longer resolves). Deploys
+// configured before the move still set it, so map it to the new host.
+const RETIRED_RAIL402 = /^https:\/\/facilitator\.rail402\.dev\/?$/;
+const FACILITATOR_URL = (process.env.FACILITATOR_URL || "https://channels.openzeppelin.com/x402/testnet").replace(RETIRED_RAIL402, () => {
+  console.warn("FACILITATOR_URL points at the retired facilitator.rail402.dev; using https://testnet.rail402.dev");
+  return "https://testnet.rail402.dev";
+});
 const PORT = Number(process.env.PORT || 3001);
 
 // OZ Channels needs an API key on testnet and mainnet; Rail402 needs none.
