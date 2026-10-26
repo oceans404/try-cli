@@ -1,5 +1,5 @@
 // Pet photo -> black pen-drawing SVG for printing (napkins, cards).
-//   1. An image model redraws the photo as fine black line art (OpenAI gpt-image-1).
+//   1. An image model redraws the photo as fine black line art (OpenAI gpt-image-2.5-sunburst).
 //   2. The line art is thresholded to pure black and white.
 //   3. potrace turns it into vector paths: one color (#000), transparent background.
 import sharp from "sharp";
@@ -16,7 +16,7 @@ export const STYLE_PROMPT = [
 const OPENAI_URL = "https://api.openai.com/v1/images/edits";
 
 // Step 1: photo -> line-art PNG (buffer).
-export async function drawLineArt(photo, { apiKey = process.env.OPENAI_API_KEY, model = process.env.IMAGE_MODEL || "gpt-image-1" } = {}) {
+export async function drawLineArt(photo, { apiKey = process.env.OPENAI_API_KEY, model = process.env.IMAGE_MODEL || "gpt-image-2.5-sunburst" } = {}) {
   if (!apiKey) throw new Error("OPENAI_API_KEY is not set");
   // Normalize the upload: honor EXIF rotation, cap the size, send PNG.
   const png = await sharp(photo).rotate().resize(1536, 1536, { fit: "inside", withoutEnlargement: true }).png().toBuffer();

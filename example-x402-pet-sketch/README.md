@@ -10,7 +10,7 @@ cards, and invitations. $0.25 in USDC per sketch over
 
 ## How it works
 
-1. **Draw:** OpenAI `gpt-image-1` (image edit) redraws the photo as fine ink
+1. **Draw:** OpenAI `gpt-image-2.5-sunburst` (image edit) redraws the photo as fine ink
    line art: head and neck only, white background, no scenery. The prompt is
    `STYLE_PROMPT` in `sketch.js`.
 2. **Trace:** the line art is thresholded to pure black and white, and
@@ -91,7 +91,7 @@ public onchain, so the page needs no login.
 ## Notes
 
 - Price vs. cost: OpenAI bills each drawing to your key. Check current
-  `gpt-image-1` pricing against the $0.25 price, set in `server.js`.
+  `gpt-image-2.5-sunburst` pricing against the $0.25 price, set in `server.js`.
 - In Claude Code cloud sessions, run `node` with `NODE_USE_ENV_PROXY=1`, or
   requests to OpenAI and the facilitator are rejected with 403.
 - Keep every `@x402/*` package on the same version; they're pinned to match.
