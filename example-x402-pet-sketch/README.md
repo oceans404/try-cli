@@ -75,6 +75,8 @@ Deploy and list it exactly like [example-x402-seller](../example-x402-seller/REA
 - `OPENAI_API_KEY` in the host's environment variables, never in the repo
 - `FACILITATOR_URL=https://testnet.rail402.dev` (the default) and your `STELLAR_RECIPIENT`
 - the first paid call made against the public `https://` URL
+- the listing icon is the service's own `/icon.svg` (a paw), at `RENDER_EXTERNAL_URL`, which
+  Render sets; on another host set `PUBLIC_URL`
 
 ## Sales dashboard
 

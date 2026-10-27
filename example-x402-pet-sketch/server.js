@@ -22,6 +22,8 @@ const FACILITATOR_URL = (process.env.FACILITATOR_URL || "https://testnet.rail402
 const PORT = Number(process.env.PORT || 3002);
 const PAYWALL = process.env.PAYWALL !== "off";
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+// Public base URL for the listing icon. Render sets RENDER_EXTERNAL_URL; elsewhere set PUBLIC_URL.
+const PUBLIC_URL = (process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || "").replace(/\/$/, "");
 const PRICE_UNITS = "2500000"; // $0.25 at 7 decimals; keep in sync with price below
 const USDC_SAC = {
   "stellar:testnet": "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
@@ -65,7 +67,9 @@ if (PAYWALL) {
             maxTimeoutSeconds: 300,
           },
           serviceName: "Pet Pen Portraits",
-          tags: ["pet-portrait", "line-art", "svg", "dog", "cat", "wedding", "print"],
+          // Rail402 keeps at most 5 tags; dog and cat are in the description.
+          tags: ["pet-portrait", "line-art", "svg", "wedding", "print"],
+          ...(PUBLIC_URL && { iconUrl: `${PUBLIC_URL}/icon.svg` }),
           description:
             "Turns a photo of a dog, cat, or other pet into a black pen-drawn line-art portrait of its head, as a print-ready single-color SVG (for wedding napkins, cards, and invitations).",
           mimeType: "image/svg+xml",
@@ -117,6 +121,8 @@ if (process.env.STELLAR_RECIPIENT) {
   mountDashboard(app, { payTo: process.env.STELLAR_RECIPIENT, priceUnits: PRICE_UNITS, asset: USDC_SAC, network: NETWORK });
 }
 
+app.get("/icon.svg", (_req, res) => res.type("image/svg+xml").set("cache-control", "public, max-age=86400").send(ICON));
+
 app.get("/health", (_req, res) => res.json({ ok: true, paywall: PAYWALL, network: NETWORK }));
 
 app.listen(PORT, () =>
@@ -140,3 +146,14 @@ f.onchange = async () => {
   dl.href = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" })); dl.hidden = false;
 };
 </script>`;
+
+// Listing icon: a pen-drawn paw print, black on white.
+const ICON = `<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+<rect width="256" height="256" rx="48" fill="#ffffff"/>
+<g fill="none" stroke="#000000" stroke-width="10" stroke-linecap="round" stroke-linejoin="round">
+<path d="M128 132c-30 0-58 30-58 58 0 18 14 26 30 22 10-3 18-8 28-8s18 5 28 8c16 4 30-4 30-22 0-28-28-58-58-58z"/>
+<ellipse cx="72" cy="112" rx="18" ry="24" transform="rotate(-20 72 112)"/>
+<ellipse cx="184" cy="112" rx="18" ry="24" transform="rotate(20 184 112)"/>
+<ellipse cx="104" cy="68" rx="18" ry="25" transform="rotate(-8 104 68)"/>
+<ellipse cx="152" cy="68" rx="18" ry="25" transform="rotate(8 152 68)"/>
+</g></svg>`;
