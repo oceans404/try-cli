@@ -1,50 +1,80 @@
 // Seller dashboard: sketches sold and revenue, refreshed every few seconds.
-// Data comes from the Rail402 explorer's public read API
-// (https://explorer.rail402.dev/api/v1/openapi.json), which indexes settled
-// x402 payments per account. It labels payments by recipient, not by route, so
-// sales are the payments to STELLAR_RECIPIENT of exactly the sketch price in
-// USDC. It only counts facilitators in its registry (Rail402 and x402.org), so
-// sales settled through OZ Channels don't show up here.
-const EXPLORER = process.env.EXPLORER_API || "https://explorer.rail402.dev";
-const MAX_PAGES = 20; // 100 settlements per page
+// Data comes straight from the chain through Horizon: every USDC payment to
+// STELLAR_RECIPIENT, whichever facilitator settled it (Rail402, OZ Channels,
+// x402.org) and back to the account's creation. An x402 payment is a Soroban
+// USDC transfer, which Horizon lists as an invoke_host_function operation with
+// asset_balance_changes. Payments are labeled by recipient, not by route, so
+// sales are the payments of exactly the sketch price in USDC.
+const HORIZON = {
+  "stellar:testnet": "https://horizon-testnet.stellar.org",
+  "stellar:pubnet": "https://horizon.stellar.org",
+};
+// USDC's issuer for each network's USDC contract (Horizon names the classic asset).
+const USDC_ISSUER = {
+  CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA: "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
+  CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75: "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN",
+};
+const MAX_PAGES = 25; // 200 operations per page
+const CACHE_MS = 10_000; // every viewer polls every 5 s; Horizon rate-limits per IP
 
-async function settlementsTo(payTo, network) {
-  const net = network === "stellar:pubnet" ? "pubnet" : "testnet";
-  const items = [];
-  let cursor;
-  for (let page = 0; page < MAX_PAGES; page++) {
-    const url = new URL(`${EXPLORER}/api/v1/${net}/accounts/${payTo}/settlements`);
-    url.searchParams.set("role", "payTo");
-    url.searchParams.set("limit", "100");
-    if (cursor) url.searchParams.set("cursor", cursor);
+// "0.2500000" -> 2500000n
+const toUnits = (amount) => {
+  const [whole, frac = ""] = amount.split(".");
+  return BigInt(whole) * 10_000_000n + BigInt(frac.padEnd(7, "0").slice(0, 7));
+};
+
+// Every incoming payment of `issuer`'s USDC to `payTo`, newest first.
+async function usdcPaymentsTo(payTo, issuer, network) {
+  const payments = [];
+  let url = `${process.env.HORIZON_URL || HORIZON[network]}/accounts/${payTo}/payments?order=desc&limit=200&include_failed=false`;
+  for (let page = 0; page < MAX_PAGES && url; page++) {
     const r = await fetch(url);
-    if (!r.ok) throw new Error(`explorer ${r.status}`);
-    const d = await r.json();
-    items.push(...d.items);
-    cursor = d.nextCursor;
-    if (!cursor || d.items.length === 0) break;
+    if (r.status === 404) return payments; // account not created yet
+    if (!r.ok) throw new Error(`horizon ${r.status}`);
+    const records = (await r.json())._embedded.records;
+    for (const op of records) {
+      const changes =
+        op.type === "invoke_host_function"
+          ? (op.asset_balance_changes || []).filter((c) => c.type === "transfer")
+          : op.type.startsWith("payment") || op.type.startsWith("path_payment")
+            ? [{ from: op.from, to: op.to, amount: op.amount, asset_code: op.asset_code, asset_issuer: op.asset_issuer }]
+            : [];
+      for (const c of changes) {
+        if (c.to === payTo && c.asset_code === "USDC" && c.asset_issuer === issuer) {
+          payments.push({ tx: op.transaction_hash, buyer: c.from, units: toUnits(c.amount), at: op.created_at });
+        }
+      }
+    }
+    url = records.length === 200 ? `${url.split("?")[0]}?order=desc&limit=200&include_failed=false&cursor=${records.at(-1).paging_token}` : null;
   }
-  return items;
+  return payments;
 }
 
 export function mountDashboard(app, { payTo, priceUnits, asset, network }) {
   const expert = `https://stellar.expert/explorer/${network === "stellar:pubnet" ? "public" : "testnet"}`;
+  const issuer = USDC_ISSUER[asset];
+  const price = BigInt(priceUnits);
+  let cache = { at: 0, body: null };
 
   app.get("/dashboard/data", async (_req, res) => {
     try {
-      const payments = await settlementsTo(payTo, network);
-      const sales = payments
-        .filter((p) => p.payTo === payTo && p.amount === priceUnits && p.asset?.contract === asset)
-        .map((p) => ({ tx: p.txHash, buyer: p.payer, usdc: (Number(p.amount) / 1e7).toFixed(2), at: p.closedAt, link: `${expert}/tx/${p.txHash}` }));
-      const revenue = sales.reduce((sum, s) => sum + BigInt(priceUnits), 0n);
-      res.json({
-        payTo,
-        count: sales.length,
-        revenueUsdc: (Number(revenue) / 1e7).toFixed(2),
-        buyers: new Set(sales.map((s) => s.buyer)).size,
-        sales,
-        updatedAt: new Date().toISOString(),
-      });
+      if (!cache.body || Date.now() - cache.at > CACHE_MS) {
+        const sales = (await usdcPaymentsTo(payTo, issuer, network))
+          .filter((p) => p.units === price)
+          .map((p) => ({ tx: p.tx, buyer: p.buyer, usdc: (Number(p.units) / 1e7).toFixed(2), at: p.at, link: `${expert}/tx/${p.tx}` }));
+        cache = {
+          at: Date.now(),
+          body: {
+            payTo,
+            count: sales.length,
+            revenueUsdc: (Number(price * BigInt(sales.length)) / 1e7).toFixed(2),
+            buyers: new Set(sales.map((s) => s.buyer)).size,
+            sales,
+            updatedAt: new Date().toISOString(),
+          },
+        };
+      }
+      res.json(cache.body);
     } catch (err) {
       res.status(502).json({ error: err.message });
     }

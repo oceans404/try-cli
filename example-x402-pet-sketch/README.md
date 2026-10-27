@@ -79,14 +79,14 @@ Deploy and list it exactly like [example-x402-seller](../example-x402-seller/REA
 ## Sales dashboard
 
 `/dashboard` shows sketches sold, total revenue, unique buyers, and each sale
-with its stellar.expert link, refreshing every 5 seconds. It reads settled
-payments to `STELLAR_RECIPIENT` from the Rail402 explorer's public API and
-counts those of exactly $0.25 in USDC. The explorer only counts facilitators
-in its registry (Rail402 and x402.org), so sales settled through OZ Channels
-don't appear. It groups payments by
-recipient, not by route, so give this service its own `STELLAR_RECIPIENT` if
-the same address is paid for other things at the same price. The data is
-public onchain, so the page needs no login.
+with its stellar.expert link, refreshing every 5 seconds. It reads every USDC
+payment to `STELLAR_RECIPIENT` from Horizon, so it counts sales settled by any
+facilitator (Rail402, OZ Channels, x402.org) back to the account's creation,
+and keeps those of exactly $0.25. Payments are grouped by recipient, not by
+route, so give this service its own `STELLAR_RECIPIENT` if the same address is
+paid for other things at the same price. The data is public onchain, so the
+page needs no login. Testnet resets wipe the history along with everything
+else.
 
 ## Notes
 
