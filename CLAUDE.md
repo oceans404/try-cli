@@ -77,7 +77,9 @@ on the DEX with `tx new path-payment-strict-receive --send-asset native
 
 ## Docs and references
 
-- **Stellar docs:** WebFetch is blocked; use `curl`. Add `.md` to any page URL.
+- **Stellar docs:** WebFetch works but returns summaries and short quotes; use
+  `curl` for exact text. (WebFetch also reads GitHub discussions, which `curl`
+  through the proxy can't.) Add `.md` to any page URL.
   The index is `https://developers.stellar.org/llms.txt`, and `llms-full.txt`
   is large, so grep it. Use `developers.stellar.org` directly; `docs.stellar.org`
   redirects to plain http, which the proxy refuses.
